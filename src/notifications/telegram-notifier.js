@@ -382,12 +382,12 @@ Happy printing! 🖨️
     }
   }
 
-  // Handle status command - needs access to capture and LLM client
+  // Handle status command - uses queue system
   async handleStatusCommand(msg) {
     const chatId = msg.chat.id;
     
     try {
-      await this.bot.sendMessage(chatId, '📊 <b>Status Command Received</b>\nCapturing current frame and analyzing with AI...', {
+      await this.bot.sendMessage(chatId, '📊 <b>Status Command Received</b>\nQueuing request for analysis...', {
         parse_mode: 'HTML'
       });
 
@@ -399,25 +399,39 @@ Happy printing! 🖨️
         return;
       }
 
-      // Capture current frame
-      const frameBuffer = await this.capture.captureFrame();
-      if (!frameBuffer) {
-        await this.bot.sendMessage(chatId, '❌ <b>Capture Failed</b>\nCould not capture frame from printer. Check connection.', {
+      // Use queue system if available, otherwise fall back to direct processing
+      let result;
+      if (this.printMonitor && this.printMonitor.queueLLMRequest) {
+        try {
+          // Queue the request
+          result = await this.printMonitor.queueLLMRequest('status', {
+            source: 'telegram',
+            chatId
+          });
+          
+          await this.bot.sendMessage(chatId, '✅ <b>Analysis Complete</b>\nProcessing results...', {
+            parse_mode: 'HTML'
+          });
+          
+        } catch (queueError) {
+          logger.error(`Queue request failed: ${queueError.message}`);
+          await this.bot.sendMessage(chatId, '⚠️ <b>Queue Error</b>\nFalling back to direct processing...', {
+            parse_mode: 'HTML'
+          });
+          
+          // Fall back to direct processing
+          result = await this.processStatusDirectly();
+        }
+      } else {
+        // Fall back to direct processing
+        await this.bot.sendMessage(chatId, '⚠️ <b>Queue Not Available</b>\nProcessing directly...', {
           parse_mode: 'HTML'
         });
-        return;
+        result = await this.processStatusDirectly();
       }
 
-      // Analyze with LLM
-      const analysis = await this.llmClient.analyzeImage(
-        frameBuffer,
-        this.prompts.systemPrompt,
-        this.prompts.getUserPrompt(),
-        false // debug mode
-      );
-
       // Format status message
-      const statusMessage = this.formatStatusMessage(analysis);
+      const statusMessage = this.formatStatusMessage(result.analysis);
       
       // Send status message
       await this.bot.sendMessage(chatId, statusMessage, {
@@ -426,11 +440,11 @@ Happy printing! 🖨️
       });
 
       // Send annotated image if we have analysis data
-      if (analysis && (analysis.objects?.length > 0 || analysis.problems?.length > 0)) {
+      if (result.analysis && (result.analysis.objects?.length > 0 || result.analysis.problems?.length > 0)) {
         try {
           const annotatedImage = await this.imageAnnotator.annotateImage(
-            frameBuffer,
-            analysis,
+            result.frameBuffer,
+            result.analysis,
             {
               showLabels: true,
               showConfidence: true,
@@ -453,7 +467,7 @@ Happy printing! 🖨️
         } catch (annotationError) {
           logger.warn(`Failed to create annotated image for status: ${annotationError.message}`);
           // Send original image as fallback
-          const resizedImage = await sharp(frameBuffer)
+          const resizedImage = await sharp(result.frameBuffer)
             .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
             .jpeg({ quality: 80 })
             .toBuffer();
@@ -464,7 +478,7 @@ Happy printing! 🖨️
         }
       } else {
         // Send original image if no analysis data
-        const resizedImage = await sharp(frameBuffer)
+        const resizedImage = await sharp(result.frameBuffer)
           .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 80 })
           .toBuffer();
@@ -482,12 +496,35 @@ Happy printing! 🖨️
     }
   }
 
-  // Handle capture command
+  // Fallback method for direct processing (without queue)
+  async processStatusDirectly() {
+    // Capture current frame
+    const frameBuffer = await this.capture.captureFrame();
+    if (!frameBuffer) {
+      throw new Error('Failed to capture frame');
+    }
+
+    // Analyze with LLM
+    const analysis = await this.llmClient.analyzeImage(
+      frameBuffer,
+      this.prompts.systemPrompt,
+      this.prompts.getUserPrompt(),
+      false // debug mode
+    );
+
+    return {
+      frameBuffer,
+      analysis,
+      timestamp: Date.now()
+    };
+  }
+
+  // Handle capture command - uses queue system for frame capture
   async handleCaptureCommand(msg) {
     const chatId = msg.chat.id;
     
     try {
-      await this.bot.sendMessage(chatId, '📸 <b>Capture Command Received</b>\nCapturing current frame from printer...', {
+      await this.bot.sendMessage(chatId, '📸 <b>Capture Command Received</b>\nQueuing frame capture request...', {
         parse_mode: 'HTML'
       });
 
@@ -499,8 +536,38 @@ Happy printing! 🖨️
         return;
       }
 
-      // Capture current frame
-      const frameBuffer = await this.capture.captureFrame();
+      // Use queue system if available, otherwise fall back to direct processing
+      let frameBuffer;
+      if (this.printMonitor && this.printMonitor.queueLLMRequest) {
+        try {
+          // Queue the frame capture request
+          const result = await this.printMonitor.queueLLMRequest('frame', {
+            source: 'telegram',
+            chatId
+          });
+          
+          frameBuffer = result.frameBuffer;
+          await this.bot.sendMessage(chatId, '✅ <b>Frame Captured</b>\nProcessing image...', {
+            parse_mode: 'HTML'
+          });
+          
+        } catch (queueError) {
+          logger.error(`Queue request failed: ${queueError.message}`);
+          await this.bot.sendMessage(chatId, '⚠️ <b>Queue Error</b>\nFalling back to direct capture...', {
+            parse_mode: 'HTML'
+          });
+          
+          // Fall back to direct capture
+          frameBuffer = await this.capture.captureFrame();
+        }
+      } else {
+        // Fall back to direct capture
+        await this.bot.sendMessage(chatId, '⚠️ <b>Queue Not Available</b>\nCapturing directly...', {
+          parse_mode: 'HTML'
+        });
+        frameBuffer = await this.capture.captureFrame();
+      }
+
       if (!frameBuffer) {
         await this.bot.sendMessage(chatId, '❌ <b>Capture Failed</b>\nCould not capture frame from printer. Check connection.', {
           parse_mode: 'HTML'
@@ -530,12 +597,12 @@ Happy printing! 🖨️
     }
   }
 
-  // Handle analyze command
+  // Handle analyze command - uses queue system
   async handleAnalyzeCommand(msg) {
     const chatId = msg.chat.id;
     
     try {
-      await this.bot.sendMessage(chatId, '🤖 <b>Analyze Command Received</b>\nCapturing frame and analyzing with AI...', {
+      await this.bot.sendMessage(chatId, '🤖 <b>Analyze Command Received</b>\nQueuing request for detailed analysis...', {
         parse_mode: 'HTML'
       });
 
@@ -547,25 +614,39 @@ Happy printing! 🖨️
         return;
       }
 
-      // Capture current frame
-      const frameBuffer = await this.capture.captureFrame();
-      if (!frameBuffer) {
-        await this.bot.sendMessage(chatId, '❌ <b>Capture Failed</b>\nCould not capture frame from printer. Check connection.', {
+      // Use queue system if available, otherwise fall back to direct processing
+      let result;
+      if (this.printMonitor && this.printMonitor.queueLLMRequest) {
+        try {
+          // Queue the request
+          result = await this.printMonitor.queueLLMRequest('analyze', {
+            source: 'telegram',
+            chatId
+          });
+          
+          await this.bot.sendMessage(chatId, '✅ <b>Analysis Complete</b>\nProcessing detailed results...', {
+            parse_mode: 'HTML'
+          });
+          
+        } catch (queueError) {
+          logger.error(`Queue request failed: ${queueError.message}`);
+          await this.bot.sendMessage(chatId, '⚠️ <b>Queue Error</b>\nFalling back to direct processing...', {
+            parse_mode: 'HTML'
+          });
+          
+          // Fall back to direct processing
+          result = await this.processStatusDirectly();
+        }
+      } else {
+        // Fall back to direct processing
+        await this.bot.sendMessage(chatId, '⚠️ <b>Queue Not Available</b>\nProcessing directly...', {
           parse_mode: 'HTML'
         });
-        return;
+        result = await this.processStatusDirectly();
       }
 
-      // Analyze with LLM
-      const analysis = await this.llmClient.analyzeImage(
-        frameBuffer,
-        this.prompts.systemPrompt,
-        this.prompts.getUserPrompt(),
-        false // debug mode
-      );
-
       // Format detailed analysis message
-      const analysisMessage = this.formatDetailedAnalysis(analysis);
+      const analysisMessage = this.formatDetailedAnalysis(result.analysis);
       
       // Send analysis message
       await this.bot.sendMessage(chatId, analysisMessage, {
@@ -574,11 +655,11 @@ Happy printing! 🖨️
       });
 
       // Send annotated image
-      if (analysis && (analysis.objects?.length > 0 || analysis.problems?.length > 0)) {
+      if (result.analysis && (result.analysis.objects?.length > 0 || result.analysis.problems?.length > 0)) {
         try {
           const annotatedImage = await this.imageAnnotator.annotateImage(
-            frameBuffer,
-            analysis,
+            result.frameBuffer,
+            result.analysis,
             {
               showLabels: true,
               showConfidence: true,
@@ -601,7 +682,7 @@ Happy printing! 🖨️
         } catch (annotationError) {
           logger.warn(`Failed to create annotated image for analysis: ${annotationError.message}`);
           // Send original image as fallback
-          const resizedImage = await sharp(frameBuffer)
+          const resizedImage = await sharp(result.frameBuffer)
             .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
             .jpeg({ quality: 80 })
             .toBuffer();
@@ -826,10 +907,11 @@ Commands like <code>/status</code>, <code>/capture</code>, <code>/analyze</code>
   }
 
   // Method to set dependencies for command handling
-  setDependencies(capture, llmClient, prompts) {
+  setDependencies(capture, llmClient, prompts, printMonitor = null) {
     this.capture = capture;
     this.llmClient = llmClient;
     this.prompts = prompts;
+    this.printMonitor = printMonitor;
     logger.info('Telegram notifier dependencies set for command handling');
   }
 }

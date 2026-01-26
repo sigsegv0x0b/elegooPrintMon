@@ -182,41 +182,43 @@ class ConsoleNotifier {
     }
   }
 
-  async handleStatusCommand(captureInstance, llmClient, prompts, debugMode = false) {
+  async handleStatusCommand(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {
     console.log('📊 Status Command Received');
-    console.log('Capturing current frame...');
+    console.log('Queuing request for analysis...');
 
     try {
-      // Capture current frame
-      const frameBuffer = await captureInstance.captureFrame();
-      if (!frameBuffer) {
-        console.log('❌ Failed to capture frame');
-        return;
+      let result;
+      
+      // Use queue system if available
+      if (printMonitor && printMonitor.queueLLMRequest) {
+        try {
+          result = await printMonitor.queueLLMRequest('status', {
+            source: 'console'
+          });
+          console.log('✅ Analysis complete, processing results...');
+        } catch (queueError) {
+          console.log(`⚠️ Queue error: ${queueError.message}, falling back to direct processing...`);
+          result = await this.processStatusDirectly(captureInstance, llmClient, prompts, debugMode);
+        }
+      } else {
+        console.log('⚠️ Queue not available, processing directly...');
+        result = await this.processStatusDirectly(captureInstance, llmClient, prompts, debugMode);
       }
 
       // Save the image
-      const imagePath = await this.saveImage(frameBuffer, 'status', 'status');
+      const imagePath = await this.saveImage(result.frameBuffer, 'status', 'status');
       console.log(`📸 Status image saved: ${imagePath}`);
 
-      // Analyze with LLM
-      console.log('🤖 Analyzing with AI...');
-      const analysis = await llmClient.analyzeImage(
-        frameBuffer,
-        prompts.systemPrompt,
-        prompts.getUserPrompt(),
-        debugMode
-      );
-
       // Display analysis results
-      this.displayStatusAnalysis(analysis, imagePath);
+      this.displayStatusAnalysis(result.analysis, imagePath);
       
       // Save annotated version if we have bounding boxes
-      if ((analysis.objects && analysis.objects.length > 0) || 
-          (analysis.problems && analysis.problems.length > 0)) {
+      if ((result.analysis.objects && result.analysis.objects.length > 0) || 
+          (result.analysis.problems && result.analysis.problems.length > 0)) {
         try {
           const annotatedPath = await this.saveAnnotatedImage(
-            frameBuffer,
-            analysis,
+            result.frameBuffer,
+            result.analysis,
             'status',
             'status_annotated'
           );
@@ -229,6 +231,29 @@ class ConsoleNotifier {
     } catch (error) {
       console.log(`❌ Status command failed: ${error.message}`);
     }
+  }
+
+  // Fallback method for direct processing
+  async processStatusDirectly(captureInstance, llmClient, prompts, debugMode = false) {
+    // Capture current frame
+    const frameBuffer = await captureInstance.captureFrame();
+    if (!frameBuffer) {
+      throw new Error('Failed to capture frame');
+    }
+
+    // Analyze with LLM
+    const analysis = await llmClient.analyzeImage(
+      frameBuffer,
+      prompts.systemPrompt,
+      prompts.getUserPrompt(),
+      debugMode
+    );
+
+    return {
+      frameBuffer,
+      analysis,
+      timestamp: Date.now()
+    };
   }
 
   displayStatusAnalysis(analysis, imagePath) {
@@ -257,11 +282,30 @@ class ConsoleNotifier {
     }
   }
 
-  async handleCaptureCommand(captureInstance) {
+  async handleCaptureCommand(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {
     console.log('📸 Capture Command Received');
+    console.log('Queuing frame capture request...');
     
     try {
-      const frameBuffer = await captureInstance.captureFrame();
+      let frameBuffer;
+      
+      // Use queue system if available
+      if (printMonitor && printMonitor.queueLLMRequest) {
+        try {
+          const result = await printMonitor.queueLLMRequest('frame', {
+            source: 'console'
+          });
+          frameBuffer = result.frameBuffer;
+          console.log('✅ Frame captured via queue');
+        } catch (queueError) {
+          console.log(`⚠️ Queue error: ${queueError.message}, falling back to direct capture...`);
+          frameBuffer = await captureInstance.captureFrame();
+        }
+      } else {
+        console.log('⚠️ Queue not available, capturing directly...');
+        frameBuffer = await captureInstance.captureFrame();
+      }
+
       if (!frameBuffer) {
         console.log('❌ Failed to capture frame');
         return;
@@ -276,36 +320,41 @@ class ConsoleNotifier {
     }
   }
 
-  async handleAnalyzeCommand(captureInstance, llmClient, prompts, debugMode = false) {
+  async handleAnalyzeCommand(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {
     console.log('🤖 Analyze Command Received');
-    console.log('Capturing and analyzing frame...');
+    console.log('Queuing request for detailed analysis...');
 
     try {
-      const frameBuffer = await captureInstance.captureFrame();
-      if (!frameBuffer) {
-        console.log('❌ Failed to capture frame');
-        return;
+      let result;
+      
+      // Use queue system if available
+      if (printMonitor && printMonitor.queueLLMRequest) {
+        try {
+          result = await printMonitor.queueLLMRequest('analyze', {
+            source: 'console'
+          });
+          console.log('✅ Analysis complete, processing results...');
+        } catch (queueError) {
+          console.log(`⚠️ Queue error: ${queueError.message}, falling back to direct processing...`);
+          result = await this.processStatusDirectly(captureInstance, llmClient, prompts, debugMode);
+        }
+      } else {
+        console.log('⚠️ Queue not available, processing directly...');
+        result = await this.processStatusDirectly(captureInstance, llmClient, prompts, debugMode);
       }
 
-      const imagePath = await this.saveImage(frameBuffer, 'analysis', 'analysis');
+      const imagePath = await this.saveImage(result.frameBuffer, 'analysis', 'analysis');
       console.log(`📸 Image saved: ${imagePath}`);
 
-      const analysis = await llmClient.analyzeImage(
-        frameBuffer,
-        prompts.systemPrompt,
-        prompts.getUserPrompt(),
-        debugMode
-      );
-
-      this.displayAnalysisResults(analysis, imagePath);
+      this.displayAnalysisResults(result.analysis, imagePath);
       
       // Save annotated version if we have bounding boxes
-      if ((analysis.objects && analysis.objects.length > 0) || 
-          (analysis.problems && analysis.problems.length > 0)) {
+      if ((result.analysis.objects && result.analysis.objects.length > 0) || 
+          (result.analysis.problems && result.analysis.problems.length > 0)) {
         try {
           const annotatedPath = await this.saveAnnotatedImage(
-            frameBuffer,
-            analysis,
+            result.frameBuffer,
+            result.analysis,
             'analysis',
             'analysis_annotated'
           );
@@ -331,7 +380,7 @@ class ConsoleNotifier {
     console.log('');
   }
 
-  handleHelpCommand() {
+  handleHelpCommand(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {
     console.log('\n=== Console Mode Help ===');
     console.log('Available commands:');
     console.log('');
@@ -342,13 +391,19 @@ class ConsoleNotifier {
     console.log('');
     console.log('Images are saved to: images/ directory');
     console.log('Automatic alerts will also save images when problems are detected');
+    if (printMonitor && printMonitor.queueLLMRequest) {
+      console.log('');
+      console.log('✅ Queue system: ENABLED');
+      console.log('   - Requests are queued when LLM is busy');
+      console.log('   - Prevents multiple simultaneous LLM requests');
+    }
     console.log('');
   }
 
-  async processCommand(command, captureInstance, llmClient, prompts, debugMode = false) {
+  async processCommand(command, captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {
     const handler = this.commandHandlers.get(command.toLowerCase());
     if (handler) {
-      await handler(captureInstance, llmClient, prompts, debugMode);
+      await handler(captureInstance, llmClient, prompts, debugMode, printMonitor);
       return true;
     } else {
       console.log(`❌ Unknown command: ${command}`);
@@ -358,12 +413,17 @@ class ConsoleNotifier {
   }
 
   // Start interactive console mode
-  startInteractiveMode(captureInstance, llmClient, prompts, debugMode = false) {
+  startInteractiveMode(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {
     console.log('\n=== Console Mode Activated ===');
     console.log('Type commands to interact with the print monitor');
     console.log('Type "help" for available commands');
     if (debugMode) {
       console.log('⚠️  Debug mode: ENABLED (LLM responses will be shown)');
+    }
+    if (printMonitor && printMonitor.queueLLMRequest) {
+      console.log('✅ Queue system: ENABLED (requests will be queued when LLM is busy)');
+    } else {
+      console.log('⚠️  Queue system: DISABLED (requests will be processed directly)');
     }
     console.log('');
 
@@ -384,7 +444,7 @@ class ConsoleNotifier {
         return;
       }
 
-      await this.processCommand(command, captureInstance, llmClient, prompts, debugMode);
+      await this.processCommand(command, captureInstance, llmClient, prompts, debugMode, printMonitor);
       rl.prompt();
     }).on('close', () => {
       console.log('Console mode ended');

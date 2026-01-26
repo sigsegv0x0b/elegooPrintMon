@@ -17,7 +17,7 @@ class PrintMonitor {
     this.consoleNotifier = new ConsoleNotifier();
     
     // Pass dependencies to Telegram notifier for command handling
-    this.telegramNotifier.setDependencies(this.capture, this.llmClient, prompts);
+    this.telegramNotifier.setDependencies(this.capture, this.llmClient, prompts, this);
     
     this.isRunning = false;
     this.frameCount = 0;
@@ -26,6 +26,11 @@ class PrintMonitor {
     this.consoleMode = false;
     this.debugMode = false;
     
+    // Queue system for LLM requests
+    this.llmRequestQueue = [];
+    this.isProcessingLLMRequest = false;
+    this.llmRequestId = 0;
+    
     // Statistics
     this.stats = {
       framesProcessed: 0,
@@ -33,6 +38,132 @@ class PrintMonitor {
       totalProblemsDetected: 0,
       notificationsSent: 0,
       lastError: null
+    };
+  }
+
+  // Queue management methods
+  async queueLLMRequest(requestType, options = {}) {
+    const requestId = ++this.llmRequestId;
+    const request = {
+      id: requestId,
+      type: requestType,
+      options,
+      timestamp: Date.now(),
+      promise: null,
+      resolve: null,
+      reject: null
+    };
+    
+    // Create a promise that will be resolved when the request is processed
+    request.promise = new Promise((resolve, reject) => {
+      request.resolve = resolve;
+      request.reject = reject;
+    });
+    
+    // Add to queue
+    this.llmRequestQueue.push(request);
+    logger.debug(`Queued LLM request #${requestId} (${requestType}), queue length: ${this.llmRequestQueue.length}`);
+    
+    // Process queue if not already processing
+    if (!this.isProcessingLLMRequest) {
+      this.processLLMQueue();
+    }
+    
+    return request.promise;
+  }
+  
+  async processLLMQueue() {
+    if (this.isProcessingLLMRequest || this.llmRequestQueue.length === 0) {
+      return;
+    }
+    
+    this.isProcessingLLMRequest = true;
+    
+    while (this.llmRequestQueue.length > 0) {
+      const request = this.llmRequestQueue.shift();
+      logger.debug(`Processing LLM request #${request.id} (${request.type})`);
+      
+      try {
+        let result;
+        
+        switch (request.type) {
+          case 'status':
+            result = await this.processStatusRequest(request.options);
+            break;
+          case 'analyze':
+            result = await this.processAnalyzeRequest(request.options);
+            break;
+          case 'frame':
+            result = await this.processFrameRequest(request.options);
+            break;
+          default:
+            throw new Error(`Unknown request type: ${request.type}`);
+        }
+        
+        request.resolve(result);
+      } catch (error) {
+        logger.error(`LLM request #${request.id} failed: ${error.message}`);
+        request.reject(error);
+      }
+      
+      // Small delay between requests to prevent overwhelming the LLM
+      if (this.llmRequestQueue.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    
+    this.isProcessingLLMRequest = false;
+  }
+  
+  async processStatusRequest(options) {
+    const { source = 'unknown', chatId = null } = options;
+    logger.info(`Processing status request from ${source}${chatId ? ` (chat: ${chatId})` : ''}`);
+    
+    // Capture current frame
+    const frameBuffer = await this.capture.captureFrame();
+    if (!frameBuffer) {
+      throw new Error('Failed to capture frame');
+    }
+    
+    // Analyze with LLM
+    const analysis = await this.llmClient.analyzeImage(
+      frameBuffer,
+      prompts.systemPrompt,
+      prompts.getUserPrompt(),
+      this.debugMode
+    );
+    
+    return {
+      frameBuffer,
+      analysis,
+      timestamp: Date.now()
+    };
+  }
+  
+  async processAnalyzeRequest(options) {
+    const { source = 'unknown', chatId = null } = options;
+    logger.info(`Processing analyze request from ${source}${chatId ? ` (chat: ${chatId})` : ''}`);
+    
+    // Same as status but with more detailed logging
+    const result = await this.processStatusRequest(options);
+    
+    // Additional processing for analyze requests could go here
+    return result;
+  }
+  
+  async processFrameRequest(options) {
+    const { source = 'unknown' } = options;
+    logger.debug(`Processing frame capture request from ${source}`);
+    
+    // Just capture frame without LLM analysis
+    const frameBuffer = await this.capture.captureFrame();
+    if (!frameBuffer) {
+      throw new Error('Failed to capture frame');
+    }
+    
+    return {
+      frameBuffer,
+      timestamp: Date.now()
     };
   }
 
@@ -254,7 +385,7 @@ class PrintMonitor {
       
       // Start console mode if enabled
       if (this.consoleMode) {
-        this.consoleNotifier.startInteractiveMode(this.capture, this.llmClient, prompts, this.debugMode);
+        this.consoleNotifier.startInteractiveMode(this.capture, this.llmClient, prompts, this.debugMode, this);
       }
       
       // Handle graceful shutdown
