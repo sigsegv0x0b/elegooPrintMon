@@ -206,6 +206,7 @@ class PrintMonitor {
   /**
    * Check if printer status has changed significantly
    * Returns true if status changed and should trigger notification
+   * Only checks the machine field (status.machine.code) as requested
    */
   hasPrinterStatusChanged(currentStatus, previousStatus) {
     if (!currentStatus || !currentStatus.success) {
@@ -225,46 +226,7 @@ class PrintMonitor {
       return true;
     }
     
-    // Check print status change
-    const currentPrintStatus = currentStatus.status?.print?.code;
-    const previousPrintStatus = previousStatus.status?.print?.code;
-    
-    if (currentPrintStatus !== previousPrintStatus) {
-      logger.info(`Print status changed: ${previousPrintStatus} -> ${currentPrintStatus}`);
-      return true;
-    }
-    
-    // Check if print job started (filename changed from null/empty to something)
-    const currentFilename = currentStatus.status?.print?.filename;
-    const previousFilename = previousStatus.status?.print?.filename;
-    
-    if ((!previousFilename || previousFilename === '') && currentFilename && currentFilename !== '') {
-      logger.info(`Print job started: ${currentFilename}`);
-      return true;
-    }
-    
-    // Check if print job ended (filename changed from something to null/empty)
-    if (previousFilename && previousFilename !== '' && (!currentFilename || currentFilename === '')) {
-      logger.info(`Print job ended: ${previousFilename}`);
-      return true;
-    }
-    
-    // Check for significant progress milestones (every 25%)
-    if (currentStatus.progress && previousStatus.progress) {
-      const currentProgress = parseFloat(currentStatus.progress.percent);
-      const previousProgress = parseFloat(previousStatus.progress.percent);
-      
-      // Check if we crossed a 25% milestone
-      const currentMilestone = Math.floor(currentProgress / 25);
-      const previousMilestone = Math.floor(previousProgress / 25);
-      
-      if (currentMilestone !== previousMilestone && currentMilestone > 0) {
-        logger.info(`Progress milestone reached: ${currentProgress.toFixed(1)}%`);
-        return true;
-      }
-    }
-    
-    return false; // No significant change detected
+    return false; // No machine status change detected
   }
 
   /**

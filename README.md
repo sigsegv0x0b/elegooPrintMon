@@ -169,7 +169,7 @@ The system supports two operating modes via the `LLM_MODE` environment variable:
 - No LLM analysis or AI processing
 - Captures frames and monitors printer status changes
 - Still supports Telegram and console commands
-- **Smart Status Change Detection**: Only sends notifications when printer status changes significantly
+- **Smart Status Change Detection**: Only sends notifications when printer machine status changes
 - Useful when:
   - LM Studio is not available
   - You want to reduce system resource usage
@@ -187,8 +187,8 @@ npm start
 
 In disabled mode, the system will:
 - Capture frames at configured intervals
-- **Monitor printer status changes** (sampled every frame)
-- **Send notifications only when status changes** (print job started/stopped, status changes, progress milestones)
+- **Monitor printer machine status** (sampled every frame)
+- **Send notifications only when machine status changes** (Idle → Printing, Printing → Paused, etc.)
 - **Respect 1-minute cooldown** between status change notifications to prevent spam
 - Display regular frames in console only (no Telegram spam)
 - Save captured images to disk
@@ -196,20 +196,25 @@ In disabled mode, the system will:
 - **Allow user-requested status** via Telegram `/status` command or console
 
 **Status Change Detection:**
-The system detects and notifies on these significant status changes:
+The system only detects and notifies on **machine status changes**:
 - **Machine status changes** (Idle → Printing, Printing → Paused, etc.)
-- **Print status changes** (Printing → Completed, etc.)
-- **Print job started/ended** (filename changes)
-- **Progress milestones** (every 25% completion)
+- **First valid status** after startup or connection
 - **Invalid status** (connection errors, printer offline)
+
+**Note**: The system does NOT notify on:
+- Print status changes (Printing → Completed, etc.)
+- Filename changes (print job started/ended)
+- Progress changes or milestones
+- Temperature or position changes
 
 **Example Status Change Notifications:**
 ```
-🔄 Printer Status Changed: Job Started
+🔄 Printer Status Changed: Machine Status Updated
 🖨️ Elegoo Centauri Carbon
-📋 Status: Printing → 0% complete
+📋 Machine: Idle → Printing
+🖨️ Print: Printing (45% complete)
 📄 File: calibration_cube.gcode
-⏱️ Time remaining: 3h 30m
+⏱️ Time remaining: 2h 15m
 🌡️ Temperatures: Nozzle 210°C, Bed 60°C
 📸 Frame captured and attached
 ```
