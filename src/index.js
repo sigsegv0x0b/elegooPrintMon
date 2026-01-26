@@ -8,6 +8,7 @@ const TelegramNotifier = require('./notifications/telegram-notifier');
 const ConsoleNotifier = require('./notifications/console-notifier');
 const prompts = require('./llm/prompts');
 const { createPrinterModule } = require('./printer/index');
+const ImageCleanup = require('./utils/image-cleanup');
 
 class PrintMonitor {
   constructor() {
@@ -27,6 +28,9 @@ class PrintMonitor {
         logger.warn(`Failed to initialize printer module: ${error.message}`);
       }
     }
+
+    // Create image cleanup service
+    this.imageCleanup = new ImageCleanup('images');
     
     // Pass dependencies to Telegram notifier for command handling
     this.telegramNotifier.setDependencies(this.capture, this.llmClient, prompts, this, this.printerModule);
@@ -603,29 +607,32 @@ class PrintMonitor {
       logger.warn('Monitor already running');
       return;
     }
-    
+
     this.initialize().then(() => {
       this.isRunning = true;
       this.startTime = Date.now();
       this.lastAnalysisTime = Date.now();
-      
+
       logger.info('=== Starting Print Monitor ===');
-      
+
+      // Start image cleanup service
+      this.imageCleanup.start();
+
       // Start frame capture
       this.capture.startCapture(async (frameBuffer) => {
         await this.processFrame(frameBuffer);
       });
-      
+
       logger.info('Print Monitor started successfully');
-      
+
       // Start console mode if enabled
       if (this.consoleMode) {
         this.consoleNotifier.startInteractiveMode(this.capture, this.llmClient, prompts, this.debugMode, this, this.printerModule);
       }
-      
+
       // Handle graceful shutdown
       this.setupShutdownHandlers();
-      
+
     }).catch(error => {
       logger.error(`Failed to start monitor: ${error.message}`);
       this.shutdown(1);
@@ -658,15 +665,18 @@ class PrintMonitor {
       logger.warn('Monitor not running');
       return;
     }
-    
+
     logger.info('Shutting down Print Monitor...');
-    
+
     this.isRunning = false;
     this.capture.stopCapture();
-    
+
+    // Stop image cleanup service
+    this.imageCleanup.stop();
+
     // Log final statistics
     this.logFinalStatistics();
-    
+
     logger.info('Print Monitor stopped');
     process.exit(0);
   }
