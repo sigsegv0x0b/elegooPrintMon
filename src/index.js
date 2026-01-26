@@ -234,9 +234,15 @@ class PrintMonitor {
     const currentMachineText = currentStatus.status?.machine?.text || 'Unknown';
     const previousMachineText = previousStatus.status?.machine?.text || 'Unknown';
     
-    logger.debug(`Machine status comparison: ${previousMachineText}(${previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus})`);
+    logger.debug(`Machine status comparison: ${previousMachineText}(${previousMachineStatus}, type: ${typeof previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus}, type: ${typeof currentMachineStatus})`);
     
-    if (currentMachineStatus !== previousMachineStatus) {
+    // Debug: log the actual comparison
+    logger.debug(`Comparison: ${currentMachineStatus} != ${previousMachineStatus} = ${currentMachineStatus != previousMachineStatus}`);
+    logger.debug(`Strict comparison: ${currentMachineStatus} !== ${previousMachineStatus} = ${currentMachineStatus !== previousMachineStatus}`);
+    
+    // Use loose equality (==) to handle cases where values might be different types (number vs string)
+    // but represent the same status code
+    if (currentMachineStatus != previousMachineStatus) {
       logger.info(`Machine status changed: ${previousMachineText}(${previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus})`);
       return true;
     }

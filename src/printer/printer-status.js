@@ -298,21 +298,6 @@ class PrinterStatus {
             });
 
             this.sendCommand(0, {}); // Status refresh command
-            
-            // Also listen for any status updates that might come automatically
-            this.ws.on('message', (data) => {
-                try {
-                    const message = JSON.parse(data.toString());
-                    if (message.Topic?.includes('/status/') && !resolved) {
-                        resolved = true;
-                        clearTimeout(timeout);
-                        this.messageHandlers.delete('status');
-                        resolve(message.Data || message.Status);
-                    }
-                } catch (error) {
-                    // Ignore parse errors
-                }
-            });
         });
     }
 
@@ -321,15 +306,22 @@ class PrinterStatus {
      */
     async requestAttributes() {
         return new Promise((resolve, reject) => {
+            let resolved = false;
             const timeout = setTimeout(() => {
-                this.messageHandlers.delete('attributes');
-                reject(new Error('Attributes request timeout'));
+                if (!resolved) {
+                    resolved = true;
+                    this.messageHandlers.delete('attributes');
+                    reject(new Error('Attributes request timeout'));
+                }
             }, this.timeout);
 
             this.messageHandlers.set('attributes', (data) => {
-                clearTimeout(timeout);
-                this.messageHandlers.delete('attributes');
-                resolve(data);
+                if (!resolved) {
+                    resolved = true;
+                    clearTimeout(timeout);
+                    this.messageHandlers.delete('attributes');
+                    resolve(data);
+                }
             });
 
             this.sendCommand(1, {}); // Attributes command
