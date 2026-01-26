@@ -9,6 +9,7 @@ A Node.js application that monitors 3D prints in real-time using computer vision
 graph TB
     subgraph "Input Sources"
         MJPEG[MJPEG Stream<br/>192.168.10.179:3031/video]
+        PrinterWS[Printer WebSocket<br/>SDCP Protocol]
     end
     
     subgraph "Core Monitoring System"
@@ -17,6 +18,8 @@ graph TB
         LLMClient[LLM Client<br/>LM Studio Integration]
         Analyzer[Print Analyzer]
         Notifier[Telegram Notifier]
+        PrinterStatus[Printer Status Module]
+        Discovery[Printer Discovery]
     end
     
     subgraph "External Services"
@@ -35,9 +38,14 @@ graph TB
     LMStudio --> Analyzer
     Analyzer --> Notifier
     Notifier --> Telegram
+    PrinterWS --> PrinterStatus
+    PrinterStatus --> Notifier
+    PrinterStatus --> Analyzer
+    Discovery --> PrinterStatus
     Env --> FrameGrabber
     Env --> LLMClient
     Env --> Notifier
+    Env --> PrinterStatus
 ```
 
 ## Core Components
@@ -90,6 +98,7 @@ graph TB
 ```
 # Printer Configuration
 MJPEG_STREAM_URL=http://192.168.10.179:3031/video
+PRINTER_IP=192.168.10.179
 FRAME_CAPTURE_INTERVAL=10
 
 # LLM Configuration
@@ -101,11 +110,14 @@ LLM_MODEL=smolvlm2-2.2b-instruct
 TELEGRAM_BOT_TOKEN=your-bot-token
 TELEGRAM_CHAT_ID=your-chat-id
 NOTIFICATION_THRESHOLD=0.8
+ALERT_LEVEL=critical  # all, warning, critical, none
 
 # Application Settings
 LOG_LEVEL=info
 MAX_RETRIES=3
 RETRY_DELAY=5000
+DEBUG_MODE=false
+CONSOLE_MODE=false
 ```
 
 ## Project Structure
@@ -119,38 +131,59 @@ elegooPrintMon/
 │   │   └── mjpeg-capture.js
 │   ├── llm/                  # LLM integration
 │   │   ├── llm-client.js
+│   │   ├── llm-response-parser.js
 │   │   └── prompts.js
 │   ├── analysis/             # Print analysis logic
 │   │   └── print-analyzer.js
 │   ├── notifications/        # Notification system
-│   │   └── telegram-notifier.js
+│   │   ├── telegram-notifier.js
+│   │   └── console-notifier.js
+│   ├── printer/              # Printer integration
+│   │   ├── index.js
+│   │   ├── status.js
+│   │   └── discovery.js
 │   └── utils/                # Utilities
 │       ├── logger.js
-│       └── image-utils.js
+│       ├── image-annotator.js
+│       └── queue-manager.js
 ├── tests/                    # Test files
 ├── logs/                     # Application logs
 ├── .env                      # Environment configuration
 ├── .env.example              # Example configuration
 ├── package.json
 ├── README.md
+├── get-telegram-chatid.sh    # Telegram setup script
+├── .gitignore                # Git ignore file
 └── plans/                    # Planning documents
-    └── elegoo-print-monitor-plan.md
+    ├── elegoo-print-monitor-plan.md
+    ├── implementation-details.md
+    └── project-summary-and-next-steps.md
 ```
 
 ## Dependencies
 ```json
 {
+  "name": "elegoo-print-monitor",
+  "version": "1.0.0",
+  "description": "LLM-based print monitor for Elegoo Centauri Carbon printer",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "node test-basic.js"
+  },
   "dependencies": {
-    "axios": "^1.6.0",
     "dotenv": "^16.3.0",
     "node-telegram-bot-api": "^0.64.0",
     "winston": "^3.11.0",
     "sharp": "^0.33.0",
-    "openai": "^4.0.0"
+    "ws": "^8.16.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.0",
-    "jest": "^29.7.0"
+    "nodemon": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
 ```
@@ -188,8 +221,28 @@ The LLM will be instructed to return structured JSON with:
 - Periodic health checks
 
 ## Next Steps
-1. Set up project structure and dependencies
-2. Implement core modules sequentially
-3. Test with sample images before live stream
-4. Integrate with actual printer stream
-5. Deploy and monitor performance
+✅ **All planned features implemented and tested**
+✅ **Additional features added:**
+   - Console interactive mode with command-line interface
+   - Image annotation with bounding boxes (red for problems, green for objects)
+   - Telegram bot command handling (status, capture, analyze, help, alertlevel)
+   - Configurable alert levels (all, warning, critical, none)
+   - Queue system for LLM requests to prevent overload
+   - Printer status module with WebSocket integration
+   - Printer discovery via UDP broadcast
+   - Number formatting to 2 decimal places for clean output
+   - GitHub repository setup with proper `.gitignore`
+
+### 🚀 **Deployment Ready:**
+1. **Configure environment variables** in `.env` file
+2. **Start LM Studio** with desired vision language model
+3. **Run the monitor** with `npm start` or `npm start -- --console` for interactive mode
+4. **Monitor logs** in `logs/` directory for system status
+5. **Use Telegram commands** for real-time control and status updates
+
+### 🔮 **Future Enhancements:**
+- Web dashboard interface for remote monitoring
+- Historical analysis and trend detection
+- Support for additional printer models
+- Mobile app companion
+- Automated print recovery actions

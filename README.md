@@ -12,6 +12,7 @@ An LLM-based real-time print monitoring system for Elegoo Centauri Carbon 3D pri
 - **Interactive Commands**: Telegram bot responds to commands just like console client
 - **Configurable Alert Levels**: Control when automatic notifications are sent (all, warning, critical, none)
 - **Console Interactive Mode**: Command-line interface with status, capture, and analyze commands
+- **Printer Status Integration**: Real-time printer job status via SDCP WebSocket API
 - **Configurable**: All settings via environment variables
 - **Robust Error Handling**: Retry logic and graceful degradation
 
@@ -240,7 +241,80 @@ Bot: 📊 Status Command Received
      ⚠️ Problems Detected:
      1. Layer shifting (85%)
      
-     📸 Annotated image attached
+     🖨️ Printer Status:
+     Elegoo Centauri Carbon
+     IP: 192.168.10.179
+     Status: Printing
+     Progress: 45%
+     Time remaining: 2h 15m
+     Temperatures: Nozzle 210°C, Bed 60°C
+     
+     � Annotated image attached
+```
+
+## Printer Status Integration
+
+The system now includes direct printer status monitoring via the Elegoo SDCP WebSocket API. This provides real-time printer job status alongside AI analysis.
+
+### Features:
+- **Real-time Printer Status**: Get current print job status, progress, and temperatures
+- **Network Discovery**: Automatically discover printers on your local network
+- **Command Integration**: `/status` command now shows both AI analysis and printer status
+- **Modular Design**: Separate modules for discovery and status retrieval
+
+### Configuration:
+Add printer IP to your `.env` file:
+```env
+# Printer Configuration
+PRINTER_IP=192.168.10.179
+```
+
+### Status Command Output:
+The `/status` command now provides comprehensive information:
+
+1. **AI Analysis**: Visual analysis of current print frame
+2. **Printer Status**: Real-time printer job information including:
+   - Machine status (idle, printing, paused, error)
+   - Print progress and time remaining
+   - Current temperatures (nozzle, bed)
+   - Print filename and layer information
+   - Build plate position and speed
+
+### Example Console Status Output:
+```
+=== AI Analysis Results ===
+Overall Status: GOOD
+Objects Detected: 2
+Problems Detected: 0
+
+=== Printer Status ===
+🖨️ Elegoo Centauri Carbon
+🌐 IP: 192.168.10.179
+💾 Firmware: v1.2.3
+📏 Build Volume: 256x256x256mm
+
+📋 Status
+   Machine: Printing
+   Print: 45% complete
+   File: calibration_cube.gcode
+   Time remaining: 2h 15m
+
+🌡️ Temperatures
+   Nozzle: 210°C / 210°C
+   Bed: 60°C / 60°C
+
+📊 Progress
+   Layer: 45/100
+   Height: 22.5mm / 50mm
+   Duration: 1h 30m / 3h 45m
+```
+
+### Standalone CLI Tool:
+Use the standalone printer status tool:
+```bash
+node printer-status.js --status
+node printer-status.js --discover
+node printer-status.js --update-env
 ```
 
 ## LLM Prompt Engineering

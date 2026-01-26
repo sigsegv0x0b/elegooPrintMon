@@ -12,6 +12,7 @@ class TelegramNotifier {
     this.bot = null;
     this.isInitialized = false;
     this.imageAnnotator = new ImageAnnotator();
+    this.printerModule = null;
     
     this.initialize();
   }
@@ -387,11 +388,41 @@ Happy printing! 🖨️
     const chatId = msg.chat.id;
     
     try {
-      await this.bot.sendMessage(chatId, '📊 <b>Status Command Received</b>\nQueuing request for analysis...', {
+      await this.bot.sendMessage(chatId, '📊 <b>Status Command Received</b>\nGetting printer status...', {
         parse_mode: 'HTML'
       });
 
-      // Check if we have the required dependencies
+      // First, get printer status immediately if printer module is available
+      let printerStatusMessage = '';
+      if (this.printerModule) {
+        try {
+          const printerStatus = await this.printerModule.getStatusText();
+          printerStatusMessage = `<b>🖨️ Printer Status:</b>\n${printerStatus}`;
+          
+          // Send printer status immediately
+          await this.bot.sendMessage(chatId, printerStatusMessage, {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true
+          });
+          
+        } catch (printerError) {
+          logger.warn(`Failed to get printer status: ${printerError.message}`);
+          await this.bot.sendMessage(chatId, '⚠️ <i>Printer status unavailable</i>', {
+            parse_mode: 'HTML'
+          });
+        }
+      } else {
+        await this.bot.sendMessage(chatId, 'ℹ️ <i>Printer status module not configured</i>', {
+          parse_mode: 'HTML'
+        });
+      }
+
+      // Now proceed with LLM analysis
+      await this.bot.sendMessage(chatId, '🤖 <b>Now analyzing with AI...</b>\nQueuing request for visual analysis...', {
+        parse_mode: 'HTML'
+      });
+
+      // Check if we have the required dependencies for LLM analysis
       if (!this.capture || !this.llmClient || !this.prompts) {
         await this.bot.sendMessage(chatId, '⚠️ <b>System Not Ready</b>\nCommand handling dependencies not available. Please ensure the main application is running.', {
           parse_mode: 'HTML'
@@ -430,10 +461,10 @@ Happy printing! 🖨️
         result = await this.processStatusDirectly();
       }
 
-      // Format status message
+      // Format AI analysis message
       const statusMessage = this.formatStatusMessage(result.analysis);
       
-      // Send status message
+      // Send AI analysis message
       await this.bot.sendMessage(chatId, statusMessage, {
         parse_mode: 'HTML',
         disable_web_page_preview: true
@@ -461,7 +492,7 @@ Happy printing! 🖨️
             .toBuffer();
           
           await this.bot.sendPhoto(chatId, resizedImage, {
-            caption: '📊 Current Print Status - Annotated Analysis'
+            caption: '📊 AI Analysis - Annotated Results'
           });
           
         } catch (annotationError) {
@@ -473,7 +504,7 @@ Happy printing! 🖨️
             .toBuffer();
           
           await this.bot.sendPhoto(chatId, resizedImage, {
-            caption: '📊 Current Print Status - Original Frame'
+            caption: '📊 AI Analysis - Original Frame'
           });
         }
       } else {
@@ -484,7 +515,7 @@ Happy printing! 🖨️
           .toBuffer();
         
         await this.bot.sendPhoto(chatId, resizedImage, {
-          caption: '📊 Current Print Status'
+          caption: '📊 AI Analysis'
         });
       }
 
@@ -907,12 +938,16 @@ Commands like <code>/status</code>, <code>/capture</code>, <code>/analyze</code>
   }
 
   // Method to set dependencies for command handling
-  setDependencies(capture, llmClient, prompts, printMonitor = null) {
+  setDependencies(capture, llmClient, prompts, printMonitor = null, printerModule = null) {
     this.capture = capture;
     this.llmClient = llmClient;
     this.prompts = prompts;
     this.printMonitor = printMonitor;
+    this.printerModule = printerModule;
     logger.info('Telegram notifier dependencies set for command handling');
+    if (printerModule) {
+      logger.info('Printer module configured for status commands');
+    }
   }
 }
 

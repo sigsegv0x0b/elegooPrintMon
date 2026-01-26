@@ -182,9 +182,25 @@ class ConsoleNotifier {
     }
   }
 
-  async handleStatusCommand(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {
+  async handleStatusCommand(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null, printerModule = null) {
     console.log('📊 Status Command Received');
-    console.log('Queuing request for analysis...');
+
+    // First, get printer status immediately if printer module is available
+    if (printerModule) {
+      try {
+        const printerStatus = await printerModule.getStatusText();
+        console.log('\n=== Printer Status ===');
+        console.log(printerStatus);
+      } catch (printerError) {
+        console.log(`⚠️  Printer status unavailable: ${printerError.message}`);
+      }
+    } else {
+      console.log('\nℹ️  Printer status module not configured');
+    }
+
+    // Now proceed with LLM analysis
+    console.log('\n🤖 Now analyzing with AI...');
+    console.log('Queuing request for visual analysis...');
 
     try {
       let result;
@@ -280,6 +296,51 @@ class ConsoleNotifier {
       console.log('✅ No problems detected');
       console.log('');
     }
+  }
+
+  // Display analysis results for regular frames (not alerts)
+  displayFrameAnalysis(frameNumber, analysis) {
+    const statusEmoji = {
+      'good': '✅',
+      'warning': '⚠️',
+      'critical': '🚨',
+      'error': '❌'
+    }[analysis.overall_status] || '❓';
+
+    console.log(`\n=== Frame ${frameNumber} Analysis ===`);
+    console.log(`${statusEmoji} Status: ${analysis.overall_status.toUpperCase()}`);
+
+    if (analysis.objects && analysis.objects.length > 0) {
+      console.log(`👀 Objects: ${analysis.objects.length}`);
+      analysis.objects.forEach((obj, index) => {
+        if (index < 3) { // Show first 3 objects only
+          console.log(`   ${obj.description} (${Math.round(obj.confidence * 100)}%)`);
+        }
+      });
+      if (analysis.objects.length > 3) {
+        console.log(`   ... and ${analysis.objects.length - 3} more`);
+      }
+    } else {
+      console.log('👀 Objects: None detected');
+    }
+
+    if (analysis.problems && analysis.problems.length > 0) {
+      console.log(`⚠️ Problems: ${analysis.problems.length}`);
+      analysis.problems.forEach((problem, index) => {
+        if (index < 2) { // Show first 2 problems only
+          const confidencePercent = Math.round(problem.confidence * 100);
+          console.log(`   ${problem.issue} (${confidencePercent}%)`);
+        }
+      });
+      if (analysis.problems.length > 2) {
+        console.log(`   ... and ${analysis.problems.length - 2} more`);
+      }
+    } else {
+      console.log('✅ Problems: None detected');
+    }
+
+    console.log(`⏱️  Time: ${new Date().toLocaleTimeString()}`);
+    console.log('');
   }
 
   async handleCaptureCommand(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {
@@ -400,10 +461,15 @@ class ConsoleNotifier {
     console.log('');
   }
 
-  async processCommand(command, captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {
+  async processCommand(command, captureInstance, llmClient, prompts, debugMode = false, printMonitor = null, printerModule = null) {
     const handler = this.commandHandlers.get(command.toLowerCase());
     if (handler) {
-      await handler(captureInstance, llmClient, prompts, debugMode, printMonitor);
+      // Pass printerModule to status command handler
+      if (command.toLowerCase() === 'status' || command.toLowerCase() === '/status') {
+        await handler(captureInstance, llmClient, prompts, debugMode, printMonitor, printerModule);
+      } else {
+        await handler(captureInstance, llmClient, prompts, debugMode, printMonitor);
+      }
       return true;
     } else {
       console.log(`❌ Unknown command: ${command}`);
@@ -413,7 +479,7 @@ class ConsoleNotifier {
   }
 
   // Start interactive console mode
-  startInteractiveMode(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {
+  startInteractiveMode(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null, printerModule = null) {
     console.log('\n=== Console Mode Activated ===');
     console.log('Type commands to interact with the print monitor');
     console.log('Type "help" for available commands');
@@ -424,6 +490,9 @@ class ConsoleNotifier {
       console.log('✅ Queue system: ENABLED (requests will be queued when LLM is busy)');
     } else {
       console.log('⚠️  Queue system: DISABLED (requests will be processed directly)');
+    }
+    if (printerModule) {
+      console.log('🖨️  Printer status: ENABLED (status command will show printer job status)');
     }
     console.log('');
 
@@ -444,7 +513,7 @@ class ConsoleNotifier {
         return;
       }
 
-      await this.processCommand(command, captureInstance, llmClient, prompts, debugMode, printMonitor);
+      await this.processCommand(command, captureInstance, llmClient, prompts, debugMode, printMonitor, printerModule);
       rl.prompt();
     }).on('close', () => {
       console.log('Console mode ended');

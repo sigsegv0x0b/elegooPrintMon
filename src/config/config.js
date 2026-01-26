@@ -5,6 +5,7 @@ const config = {
   // Printer stream
   mjpegStreamUrl: process.env.MJPEG_STREAM_URL || 'http://192.168.10.179:3031/video',
   frameCaptureInterval: parseInt(process.env.FRAME_CAPTURE_INTERVAL || '10000'),
+  printerIP: process.env.PRINTER_IP || '',
   
   // LLM Configuration
   openaiUrl: process.env.OPENAI_URL || 'http://localhost:1234/v1',

@@ -7,6 +7,7 @@ const LLMClient = require('./llm/llm-client');
 const TelegramNotifier = require('./notifications/telegram-notifier');
 const ConsoleNotifier = require('./notifications/console-notifier');
 const prompts = require('./llm/prompts');
+const { createPrinterModule } = require('./printer/index');
 
 class PrintMonitor {
   constructor() {
@@ -16,8 +17,19 @@ class PrintMonitor {
     this.telegramNotifier = new TelegramNotifier();
     this.consoleNotifier = new ConsoleNotifier();
     
+    // Create printer module if printer IP is configured
+    this.printerModule = null;
+    if (config.printerIP) {
+      try {
+        this.printerModule = createPrinterModule(config.printerIP);
+        logger.info(`Printer module initialized with IP: ${config.printerIP}`);
+      } catch (error) {
+        logger.warn(`Failed to initialize printer module: ${error.message}`);
+      }
+    }
+    
     // Pass dependencies to Telegram notifier for command handling
-    this.telegramNotifier.setDependencies(this.capture, this.llmClient, prompts, this);
+    this.telegramNotifier.setDependencies(this.capture, this.llmClient, prompts, this, this.printerModule);
     
     this.isRunning = false;
     this.frameCount = 0;
@@ -271,6 +283,11 @@ class PrintMonitor {
       logger.logAnalysisResult(frameNumber, analysis);
       logger.debug(`Analysis completed in ${analysisTime}ms`);
       
+      // Display analysis results to console for normal mode
+      if (!this.consoleMode) {
+        this.consoleNotifier.displayFrameAnalysis(frameNumber, analysis);
+      }
+      
       // Check for problems that need notification
       const criticalProblems = analysis.problems.filter(
         problem => problem.confidence >= this.config.notificationThreshold
@@ -385,7 +402,7 @@ class PrintMonitor {
       
       // Start console mode if enabled
       if (this.consoleMode) {
-        this.consoleNotifier.startInteractiveMode(this.capture, this.llmClient, prompts, this.debugMode, this);
+        this.consoleNotifier.startInteractiveMode(this.capture, this.llmClient, prompts, this.debugMode, this, this.printerModule);
       }
       
       // Handle graceful shutdown
