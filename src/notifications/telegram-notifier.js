@@ -1053,17 +1053,39 @@ Commands like <code>/status</code>, <code>/capture</code>, <code>/analyze</code>
       frameNumber,
       message,
       status,
+      previousStatus = null,
       imageBuffer
     } = notificationData;
 
     try {
       logger.info(`Sending printer status change notification for frame ${frameNumber}`);
 
-      // Send the formatted message
+      // Send the formatted message (which already includes the change info)
       await this.bot.sendMessage(this.chatId, message, {
         parse_mode: 'HTML',
         disable_web_page_preview: true
       });
+
+      // Send additional change details if we have previous status
+      if (previousStatus && status?.status?.machine) {
+        const currentMachine = status.status.machine.text || 'Unknown';
+        const previousMachine = previousStatus?.status?.machine?.text || 'Unknown';
+        const currentCode = status.status.machine.code;
+        const previousCode = previousStatus?.status?.machine?.code;
+        
+        const changeDetails = `\n📊 <b>Change Details:</b>\n` +
+                             `   Machine: ${previousMachine} (${previousCode}) → ${currentMachine} (${currentCode})\n`;
+        
+        // Check if this is the first status after startup
+        if (!previousStatus.success) {
+          changeDetails += `   📍 First valid status after startup\n`;
+        }
+        
+        await this.bot.sendMessage(this.chatId, changeDetails, {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        });
+      }
 
       // Send image if provided
       if (imageBuffer && imageBuffer.length > 0) {

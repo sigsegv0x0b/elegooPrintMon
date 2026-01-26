@@ -421,6 +421,7 @@ class ConsoleNotifier {
       frameNumber,
       message,
       status,
+      previousStatus = null,
       imageBuffer
     } = notificationData;
 
@@ -429,8 +430,24 @@ class ConsoleNotifier {
     console.log(`Time: ${new Date().toLocaleString()}`);
     console.log('');
     
-    // Display the formatted message
+    // Display the formatted message (which already includes the change info)
     console.log(message);
+    
+    // Also show raw change info for debugging
+    if (previousStatus && status?.status?.machine) {
+      const currentMachine = status.status.machine.text || 'Unknown';
+      const previousMachine = previousStatus?.status?.machine?.text || 'Unknown';
+      const currentCode = status.status.machine.code;
+      const previousCode = previousStatus?.status?.machine?.code;
+      
+      console.log(`\n📊 Change Details:`);
+      console.log(`   Machine: ${previousMachine} (${previousCode}) → ${currentMachine} (${currentCode})`);
+      
+      // Check if this is the first status after startup
+      if (!previousStatus.success) {
+        console.log(`   📍 First valid status after startup`);
+      }
+    }
     
     // Save image if provided
     if (imageBuffer && imageBuffer.length > 0) {

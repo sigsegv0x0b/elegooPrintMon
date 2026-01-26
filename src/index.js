@@ -209,30 +209,46 @@ class PrintMonitor {
    * Only checks the machine field (status.machine.code) as requested
    */
   hasPrinterStatusChanged(currentStatus, previousStatus) {
+    // Debug logging to help diagnose issues
+    logger.debug(`Checking status change: current=${currentStatus?.success ? 'valid' : 'invalid'}, previous=${previousStatus?.success ? 'valid' : 'invalid/null'}`);
+    
     if (!currentStatus || !currentStatus.success) {
+      logger.debug('No valid current status - returning false');
       return false; // No valid current status
     }
     
     if (!previousStatus || !previousStatus.success) {
+      logger.debug(`First valid status or previous invalid - returning true`);
       return true; // First status or previous was invalid
+    }
+    
+    // Safety check: if current and previous are the same object reference, no change
+    if (currentStatus === previousStatus) {
+      logger.debug('Current and previous status are the same object reference - returning false');
+      return false;
     }
     
     // Check machine status change (Idle -> Printing, etc.)
     const currentMachineStatus = currentStatus.status?.machine?.code;
     const previousMachineStatus = previousStatus.status?.machine?.code;
+    const currentMachineText = currentStatus.status?.machine?.text || 'Unknown';
+    const previousMachineText = previousStatus.status?.machine?.text || 'Unknown';
+    
+    logger.debug(`Machine status comparison: ${previousMachineText}(${previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus})`);
     
     if (currentMachineStatus !== previousMachineStatus) {
-      logger.info(`Machine status changed: ${previousMachineStatus} -> ${currentMachineStatus}`);
+      logger.info(`Machine status changed: ${previousMachineText}(${previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus})`);
       return true;
     }
     
+    logger.debug(`No machine status change detected (${currentMachineText} -> ${currentMachineText})`);
     return false; // No machine status change detected
   }
 
   /**
    * Send printer status change notification
    */
-  async sendPrinterStatusChangeNotification(currentStatus, frameNumber, imageBuffer) {
+  async sendPrinterStatusChangeNotification(currentStatus, previousStatus, frameNumber, imageBuffer) {
     try {
       const now = Date.now();
       
@@ -244,18 +260,26 @@ class PrintMonitor {
       
       logger.info(`Sending printer status change notification for frame #${frameNumber}`);
       
-      // Format status message
+      // Get machine status texts for change description
+      const currentMachineText = currentStatus.status?.machine?.text || 'Unknown';
+      const previousMachineText = previousStatus?.status?.machine?.text || 'Unknown';
+      const currentMachineCode = currentStatus.status?.machine?.code;
+      const previousMachineCode = previousStatus?.status?.machine?.code;
+      
+      // Format status message with change information
       let message = `🔄 **Printer Status Change Detected**\n`;
       message += `Frame: #${frameNumber}\n`;
       message += `Time: ${new Date().toLocaleString()}\n\n`;
+      
+      // Show what changed
+      message += `📋 **Changed:** ${previousMachineText} → ${currentMachineText}\n`;
       
       if (currentStatus.printer?.name) {
         message += `🖨️ ${currentStatus.printer.name}\n`;
       }
       
-      if (currentStatus.status?.machine?.text) {
-        message += `📋 Machine: ${currentStatus.status.machine.text}\n`;
-      }
+      // Show current machine status (already shown in Changed field, but include for clarity)
+      message += `📋 Machine: ${currentMachineText}\n`;
       
       if (currentStatus.status?.print?.text) {
         message += `🖨️ Print: ${currentStatus.status.print.text}\n`;
@@ -278,6 +302,7 @@ class PrintMonitor {
         frameNumber,
         message,
         status: currentStatus,
+        previousStatus: previousStatus,
         imageBuffer
       });
       
@@ -288,6 +313,7 @@ class PrintMonitor {
           frameNumber,
           message,
           status: currentStatus,
+          previousStatus: previousStatus,
           imageBuffer
         });
       }
@@ -501,8 +527,8 @@ class PrintMonitor {
             const statusChanged = this.hasPrinterStatusChanged(printerStatus, this.lastPrinterStatus);
             
             if (statusChanged) {
-              // Send status change notification
-              await this.sendPrinterStatusChangeNotification(printerStatus, frameNumber, frameBuffer);
+              // Send status change notification with previous status for comparison
+              await this.sendPrinterStatusChangeNotification(printerStatus, this.lastPrinterStatus, frameNumber, frameBuffer);
             }
             
             // Update last status
