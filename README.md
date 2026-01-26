@@ -104,11 +104,13 @@ If you want to receive Telegram notifications for print issues:
 # Printer Configuration
 MJPEG_STREAM_URL=http://192.168.10.179:3031/video
 FRAME_CAPTURE_INTERVAL=10000
+PRINTER_IP=192.168.10.179
 
 # LLM Configuration (LM Studio)
 OPENAI_URL=http://localhost:1234/v1
 OPENAI_TOKEN=your-lm-studio-token
 LLM_MODEL=smolvlm2-2.2b-instruct
+LLM_MODE=enabled  # 'enabled' for AI analysis, 'disabled' for frame capture only
 
 # Telegram Configuration (from steps above)
 TELEGRAM_BOT_TOKEN=your-bot-token-from-botfather
@@ -120,6 +122,7 @@ TELEGRAM_ALERT_LEVEL=critical
 LOG_LEVEL=info
 MAX_RETRIES=3
 RETRY_DELAY=5000
+LLM_COOLDOWN_SECONDS=10
 ```
 
 ## Project Structure
@@ -145,10 +148,71 @@ elegooPrintMon/
 ## How It Works
 
 1. **Frame Capture**: The system connects to the printer's MJPEG stream and captures frames at configured intervals
-2. **LLM Analysis**: Each frame is sent to LM Studio with a specialized prompt for 3D print analysis
+2. **LLM Analysis**: Each frame is sent to LM Studio with a specialized prompt for 3D print analysis (if LLM_MODE=enabled)
 3. **Issue Detection**: The LLM returns structured JSON identifying objects and potential problems
 4. **Notification**: If problems exceed the confidence threshold, alerts are sent to console and optionally Telegram
 5. **Logging**: All analysis results are logged for monitoring and debugging
+
+### LLM Mode Configuration
+
+The system supports two operating modes via the `LLM_MODE` environment variable:
+
+#### **`LLM_MODE=enabled` (Default)**
+- Full AI-powered analysis with LM Studio
+- Each frame is analyzed by vision language model
+- Detects objects and printing issues with confidence scores
+- Sends alerts based on configurable thresholds
+- Provides annotated images with bounding boxes
+
+#### **`LLM_MODE=disabled`**
+- Lightweight frame capture only mode
+- No LLM analysis or AI processing
+- Captures frames and monitors printer status changes
+- Still supports Telegram and console commands
+- **Smart Status Change Detection**: Only sends notifications when printer status changes significantly
+- Useful when:
+  - LM Studio is not available
+  - You want to reduce system resource usage
+  - You only need visual monitoring without AI analysis
+  - Testing printer connectivity and frame capture
+
+**Example usage with LLM disabled:**
+```bash
+# In .env file
+LLM_MODE=disabled
+
+# Run the system
+npm start
+```
+
+In disabled mode, the system will:
+- Capture frames at configured intervals
+- **Monitor printer status changes** (sampled every frame)
+- **Send notifications only when status changes** (print job started/stopped, status changes, progress milestones)
+- **Respect 1-minute cooldown** between status change notifications to prevent spam
+- Display regular frames in console only (no Telegram spam)
+- Save captured images to disk
+- Respond to `/status`, `/capture`, and `/analyze` commands (without AI analysis)
+- **Allow user-requested status** via Telegram `/status` command or console
+
+**Status Change Detection:**
+The system detects and notifies on these significant status changes:
+- **Machine status changes** (Idle → Printing, Printing → Paused, etc.)
+- **Print status changes** (Printing → Completed, etc.)
+- **Print job started/ended** (filename changes)
+- **Progress milestones** (every 25% completion)
+- **Invalid status** (connection errors, printer offline)
+
+**Example Status Change Notifications:**
+```
+🔄 Printer Status Changed: Job Started
+🖨️ Elegoo Centauri Carbon
+📋 Status: Printing → 0% complete
+📄 File: calibration_cube.gcode
+⏱️ Time remaining: 3h 30m
+🌡️ Temperatures: Nozzle 210°C, Bed 60°C
+📸 Frame captured and attached
+```
 
 ## Console Mode
 

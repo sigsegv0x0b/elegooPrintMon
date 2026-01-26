@@ -198,7 +198,34 @@ class ConsoleNotifier {
       console.log('\nℹ️  Printer status module not configured');
     }
 
-    // Now proceed with LLM analysis
+    // Check if LLM is enabled
+    const config = require('../config/config');
+    const llmEnabled = config.llmMode === 'enabled';
+
+    if (!llmEnabled) {
+      console.log('\n🤖 LLM analysis: DISABLED');
+      console.log('📸 Capturing frame only...');
+      
+      try {
+        // Just capture frame without LLM analysis
+        const frameBuffer = await captureInstance.captureFrame();
+        if (!frameBuffer) {
+          console.log('❌ Failed to capture frame');
+          return;
+        }
+
+        const imagePath = await this.saveImage(frameBuffer, 'status', 'status');
+        console.log(`✅ Status image saved: ${imagePath}`);
+        console.log(`📁 Location: ${imagePath}`);
+        
+        return;
+      } catch (error) {
+        console.log(`❌ Status command failed: ${error.message}`);
+        return;
+      }
+    }
+
+    // LLM is enabled, proceed with analysis
     console.log('\n🤖 Now analyzing with AI...');
     console.log('Queuing request for visual analysis...');
 
@@ -341,6 +368,79 @@ class ConsoleNotifier {
 
     console.log(`⏱️  Time: ${new Date().toLocaleTimeString()}`);
     console.log('');
+  }
+
+  // Display simple frame capture message (for LLM disabled mode)
+  displayFrameCapture(frameNumber) {
+    console.log(`\n=== Frame ${frameNumber} Captured ===`);
+    console.log('📸 Frame captured successfully');
+    console.log('🤖 LLM analysis: DISABLED');
+    console.log(`⏱️  Time: ${new Date().toLocaleTimeString()}`);
+    console.log('');
+  }
+
+  // Send simple status update (for LLM disabled mode)
+  async sendSimpleStatus(statusData) {
+    const {
+      frameNumber,
+      imageBuffer,
+      printerStatus = null,
+      llmEnabled = false,
+      isStatusChange = false
+    } = statusData;
+
+    if (isStatusChange) {
+      console.log(`\n🔄 Frame ${frameNumber} - Status Change Detected`);
+    } else {
+      console.log(`\n=== Frame ${frameNumber} Status ===`);
+    }
+    
+    console.log('📸 Frame captured successfully');
+    console.log(`🤖 LLM analysis: ${llmEnabled ? 'ENABLED' : 'DISABLED'}`);
+
+    // Save image
+    if (imageBuffer && imageBuffer.length > 0) {
+      const imagePath = await this.saveImage(imageBuffer, frameNumber, 'frame');
+      console.log(`📁 Image saved: ${imagePath}`);
+    }
+
+    // Display printer status if available
+    if (printerStatus) {
+      console.log('\n=== Printer Status ===');
+      console.log(printerStatus);
+    }
+
+    console.log(`⏱️  Time: ${new Date().toLocaleTimeString()}`);
+    console.log('');
+    return true;
+  }
+
+  // Send printer status change notification
+  async sendStatusChangeNotification(notificationData) {
+    const {
+      frameNumber,
+      message,
+      status,
+      imageBuffer
+    } = notificationData;
+
+    console.log(`\n🔄 ===== PRINTER STATUS CHANGE =====`);
+    console.log(`Frame: #${frameNumber}`);
+    console.log(`Time: ${new Date().toLocaleString()}`);
+    console.log('');
+    
+    // Display the formatted message
+    console.log(message);
+    
+    // Save image if provided
+    if (imageBuffer && imageBuffer.length > 0) {
+      const imagePath = await this.saveImage(imageBuffer, frameNumber, 'status_change');
+      console.log(`\n📸 Status change image saved: ${imagePath}`);
+    }
+    
+    console.log(`\n====================================`);
+    console.log('');
+    return true;
   }
 
   async handleCaptureCommand(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {

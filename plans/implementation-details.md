@@ -44,6 +44,7 @@ const config = {
   openaiUrl: process.env.OPENAI_URL || 'http://localhost:1234/v1',
   openaiToken: process.env.OPENAI_TOKEN || '',
   llmModel: process.env.LLM_MODEL || 'smolvlm2-2.2b-instruct',
+  llmMode: process.env.LLM_MODE || 'enabled',  // 'enabled' or 'disabled'
   
   // Telegram Configuration
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
@@ -412,6 +413,8 @@ module.exports = PrintMonitor;
 4. **Health Checks**: Add HTTP health endpoint for monitoring
 
 ## Printer Status Module Implementation
+
+**Printer API Documentation**: The Elegoo Centauri Carbon printer uses the SDCP (Smart Device Control Protocol) WebSocket API. Full documentation is available at: https://docs.opencentauri.cc/software/api/
 
 ### 7. Printer Status Module (`src/printer/status.js`)
 ```javascript

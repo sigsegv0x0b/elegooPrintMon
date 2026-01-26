@@ -133,6 +133,7 @@ The Elegoo Centauri Carbon LLM Print Monitor has been successfully implemented w
    - Frame capture at configurable intervals (default: 10 seconds)
    - Robust error handling and retry logic
    - Queue system for LLM requests to prevent overload
+   - **LLM_MODE configuration** ('enabled' or 'disabled') for AI-free operation
 
 2. **AI Analysis Pipeline**
    - Integration with LM Studio OpenAI-compatible API
@@ -140,6 +141,7 @@ The Elegoo Centauri Carbon LLM Print Monitor has been successfully implemented w
    - Structured JSON response parsing with flexible format handling
    - System prompt engineering for accurate print analysis
    - LLM cooldown protection to prevent API overload
+   - **LLM disabled mode** for lightweight frame capture without AI processing
 
 3. **Notification Systems**
    - Telegram bot integration with image sending

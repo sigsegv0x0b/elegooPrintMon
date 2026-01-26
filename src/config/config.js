@@ -11,6 +11,7 @@ const config = {
   openaiUrl: process.env.OPENAI_URL || 'http://localhost:1234/v1',
   openaiToken: process.env.OPENAI_TOKEN || '',
   llmModel: process.env.LLM_MODEL || 'qwen/qwen3-vl-4b',
+  llmMode: process.env.LLM_MODE || 'enabled', // 'enabled' or 'disabled'
   
   // Telegram Configuration
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',

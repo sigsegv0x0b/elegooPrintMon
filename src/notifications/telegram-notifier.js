@@ -417,7 +417,50 @@ Happy printing! 🖨️
         });
       }
 
-      // Now proceed with LLM analysis
+      // Check if LLM is enabled
+      const config = require('../config/config');
+      const llmEnabled = config.llmMode === 'enabled';
+
+      if (!llmEnabled) {
+        // LLM disabled mode - just capture and send frame
+        await this.bot.sendMessage(chatId, '🤖 <b>LLM analysis: DISABLED</b>\n📸 Capturing frame only...', {
+          parse_mode: 'HTML'
+        });
+
+        // Check if we have capture module
+        if (!this.capture) {
+          await this.bot.sendMessage(chatId, '⚠️ <b>System Not Ready</b>\nCapture module not available. Please ensure the main application is running.', {
+            parse_mode: 'HTML'
+          });
+          return;
+        }
+
+        // Capture frame
+        const frameBuffer = await this.capture.captureFrame();
+        if (!frameBuffer) {
+          await this.bot.sendMessage(chatId, '❌ <b>Capture Failed</b>\nCould not capture frame from printer. Check connection.', {
+            parse_mode: 'HTML'
+          });
+          return;
+        }
+
+        // Send captured image
+        const resizedImage = await sharp(frameBuffer)
+          .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        
+        await this.bot.sendPhoto(chatId, resizedImage, {
+          caption: '📸 Frame Captured - LLM Analysis Disabled'
+        });
+
+        await this.bot.sendMessage(chatId, '✅ <b>Frame captured successfully!</b>\nLLM analysis is disabled. Image shows current print view.', {
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      // LLM is enabled, proceed with analysis
       await this.bot.sendMessage(chatId, '🤖 <b>Now analyzing with AI...</b>\nQueuing request for visual analysis...', {
         parse_mode: 'HTML'
       });
@@ -934,6 +977,119 @@ Commands like <code>/status</code>, <code>/capture</code>, <code>/analyze</code>
       });
     } catch (error) {
       logger.error(`Failed to send alert level update: ${error.message}`);
+    }
+  }
+
+  // Send simple status update (for LLM disabled mode)
+  async sendSimpleStatus(statusData) {
+    if (!this.isInitialized) {
+      logger.warn('Telegram notifier not initialized - skipping simple status');
+      return false;
+    }
+
+    const {
+      frameNumber,
+      imageBuffer,
+      printerStatus = null,
+      llmEnabled = false
+    } = statusData;
+
+    try {
+      logger.info(`Sending simple status for frame ${frameNumber} (LLM: ${llmEnabled ? 'enabled' : 'disabled'})`);
+
+      // Prepare message
+      let message = `<b>📸 Frame ${frameNumber} Captured</b>\n`;
+      message += `🤖 LLM analysis: ${llmEnabled ? '✅ ENABLED' : '❌ DISABLED'}\n`;
+      message += `Time: ${new Date().toLocaleString()}\n`;
+
+      // Add printer status if available
+      if (printerStatus) {
+        message += `\n<b>🖨️ Printer Status:</b>\n`;
+        message += printerStatus;
+      }
+
+      // Send text message
+      await this.bot.sendMessage(this.chatId, message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      });
+
+      // Send image if provided
+      if (imageBuffer && imageBuffer.length > 0) {
+        try {
+          // Resize image for Telegram
+          const resizedImage = await sharp(imageBuffer)
+            .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 80 })
+            .toBuffer();
+
+          await this.bot.sendPhoto(this.chatId, resizedImage, {
+            caption: `📸 Frame ${frameNumber} - Current Print View`
+          });
+          
+          logger.info(`Sent frame ${frameNumber} image to Telegram`);
+        } catch (imageError) {
+          logger.warn(`Failed to send image with simple status: ${imageError.message}`);
+        }
+      }
+
+      logger.info(`Simple status sent for frame ${frameNumber}`);
+      return true;
+
+    } catch (error) {
+      logger.error(`Failed to send simple status: ${error.message}`);
+      return false;
+    }
+  }
+
+  // Send printer status change notification
+  async sendStatusChangeNotification(notificationData) {
+    if (!this.isInitialized) {
+      logger.warn('Telegram notifier not initialized - skipping status change notification');
+      return false;
+    }
+
+    const {
+      frameNumber,
+      message,
+      status,
+      imageBuffer
+    } = notificationData;
+
+    try {
+      logger.info(`Sending printer status change notification for frame ${frameNumber}`);
+
+      // Send the formatted message
+      await this.bot.sendMessage(this.chatId, message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      });
+
+      // Send image if provided
+      if (imageBuffer && imageBuffer.length > 0) {
+        try {
+          // Resize image for Telegram
+          const resizedImage = await sharp(imageBuffer)
+            .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 80 })
+            .toBuffer();
+
+          await this.bot.sendPhoto(this.chatId, resizedImage, {
+            caption: `🔄 Frame ${frameNumber} - Status Change`
+          });
+          
+          logger.info(`Sent status change image for frame ${frameNumber} to Telegram`);
+        } catch (imageError) {
+          logger.warn(`Failed to send image with status change notification: ${imageError.message}`);
+        }
+      }
+
+      logger.info(`Status change notification sent for frame ${frameNumber}`);
+      return true;
+
+    } catch (error) {
+      logger.error(`Failed to send status change notification: ${error.message}`);
+      return false;
     }
   }
 

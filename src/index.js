@@ -43,13 +43,21 @@ class PrintMonitor {
     this.isProcessingLLMRequest = false;
     this.llmRequestId = 0;
     
+    // Printer status tracking for LLM_MODE=disabled
+    this.lastPrinterStatus = null;
+    this.lastPrinterStatusTime = null;
+    this.lastNotificationTime = null;
+    this.statusChangeNotificationCooldown = 60000; // 1 minute cooldown between status change notifications
+    
     // Statistics
     this.stats = {
       framesProcessed: 0,
       framesWithProblems: 0,
       totalProblemsDetected: 0,
       notificationsSent: 0,
-      lastError: null
+      lastError: null,
+      statusChangesDetected: 0,
+      statusNotificationsSent: 0
     };
   }
 
@@ -137,17 +145,33 @@ class PrintMonitor {
       throw new Error('Failed to capture frame');
     }
     
-    // Analyze with LLM
-    const analysis = await this.llmClient.analyzeImage(
-      frameBuffer,
-      prompts.systemPrompt,
-      prompts.getUserPrompt(),
-      this.debugMode
-    );
+    let analysis = null;
+    
+    if (this.config.llmMode === 'enabled') {
+      // Analyze with LLM
+      analysis = await this.llmClient.analyzeImage(
+        frameBuffer,
+        prompts.systemPrompt,
+        prompts.getUserPrompt(),
+        this.debugMode
+      );
+    }
+    
+    // Get printer status if available
+    let printerStatus = null;
+    if (this.printerModule) {
+      try {
+        printerStatus = this.printerModule.getStatus();
+      } catch (error) {
+        logger.warn(`Failed to get printer status: ${error.message}`);
+      }
+    }
     
     return {
       frameBuffer,
       analysis,
+      printerStatus,
+      llmEnabled: this.config.llmMode === 'enabled',
       timestamp: Date.now()
     };
   }
@@ -179,6 +203,147 @@ class PrintMonitor {
     };
   }
 
+  /**
+   * Check if printer status has changed significantly
+   * Returns true if status changed and should trigger notification
+   */
+  hasPrinterStatusChanged(currentStatus, previousStatus) {
+    if (!currentStatus || !currentStatus.success) {
+      return false; // No valid current status
+    }
+    
+    if (!previousStatus || !previousStatus.success) {
+      return true; // First status or previous was invalid
+    }
+    
+    // Check machine status change (Idle -> Printing, etc.)
+    const currentMachineStatus = currentStatus.status?.machine?.code;
+    const previousMachineStatus = previousStatus.status?.machine?.code;
+    
+    if (currentMachineStatus !== previousMachineStatus) {
+      logger.info(`Machine status changed: ${previousMachineStatus} -> ${currentMachineStatus}`);
+      return true;
+    }
+    
+    // Check print status change
+    const currentPrintStatus = currentStatus.status?.print?.code;
+    const previousPrintStatus = previousStatus.status?.print?.code;
+    
+    if (currentPrintStatus !== previousPrintStatus) {
+      logger.info(`Print status changed: ${previousPrintStatus} -> ${currentPrintStatus}`);
+      return true;
+    }
+    
+    // Check if print job started (filename changed from null/empty to something)
+    const currentFilename = currentStatus.status?.print?.filename;
+    const previousFilename = previousStatus.status?.print?.filename;
+    
+    if ((!previousFilename || previousFilename === '') && currentFilename && currentFilename !== '') {
+      logger.info(`Print job started: ${currentFilename}`);
+      return true;
+    }
+    
+    // Check if print job ended (filename changed from something to null/empty)
+    if (previousFilename && previousFilename !== '' && (!currentFilename || currentFilename === '')) {
+      logger.info(`Print job ended: ${previousFilename}`);
+      return true;
+    }
+    
+    // Check for significant progress milestones (every 25%)
+    if (currentStatus.progress && previousStatus.progress) {
+      const currentProgress = parseFloat(currentStatus.progress.percent);
+      const previousProgress = parseFloat(previousStatus.progress.percent);
+      
+      // Check if we crossed a 25% milestone
+      const currentMilestone = Math.floor(currentProgress / 25);
+      const previousMilestone = Math.floor(previousProgress / 25);
+      
+      if (currentMilestone !== previousMilestone && currentMilestone > 0) {
+        logger.info(`Progress milestone reached: ${currentProgress.toFixed(1)}%`);
+        return true;
+      }
+    }
+    
+    return false; // No significant change detected
+  }
+
+  /**
+   * Send printer status change notification
+   */
+  async sendPrinterStatusChangeNotification(currentStatus, frameNumber, imageBuffer) {
+    try {
+      const now = Date.now();
+      
+      // Check cooldown period
+      if (this.lastNotificationTime && (now - this.lastNotificationTime) < this.statusChangeNotificationCooldown) {
+        logger.debug(`Skipping status change notification due to cooldown`);
+        return false;
+      }
+      
+      logger.info(`Sending printer status change notification for frame #${frameNumber}`);
+      
+      // Format status message
+      let message = `🔄 **Printer Status Change Detected**\n`;
+      message += `Frame: #${frameNumber}\n`;
+      message += `Time: ${new Date().toLocaleString()}\n\n`;
+      
+      if (currentStatus.printer?.name) {
+        message += `🖨️ ${currentStatus.printer.name}\n`;
+      }
+      
+      if (currentStatus.status?.machine?.text) {
+        message += `📋 Machine: ${currentStatus.status.machine.text}\n`;
+      }
+      
+      if (currentStatus.status?.print?.text) {
+        message += `🖨️ Print: ${currentStatus.status.print.text}\n`;
+      }
+      
+      if (currentStatus.status?.print?.filename) {
+        message += `📄 File: ${currentStatus.status.print.filename}\n`;
+      }
+      
+      if (currentStatus.progress?.percent) {
+        message += `📊 Progress: ${currentStatus.progress.percent}% (Layer ${currentStatus.progress.currentLayer}/${currentStatus.progress.totalLayers})\n`;
+      }
+      
+      if (currentStatus.time?.remaining) {
+        message += `⏱️ ETA: ${currentStatus.time.remaining}\n`;
+      }
+      
+      // Send to console
+      await this.consoleNotifier.sendStatusChangeNotification({
+        frameNumber,
+        message,
+        status: currentStatus,
+        imageBuffer
+      });
+      
+      // Send to Telegram if configured
+      let telegramSent = false;
+      if (this.telegramNotifier.isConfigured()) {
+        telegramSent = await this.telegramNotifier.sendStatusChangeNotification({
+          frameNumber,
+          message,
+          status: currentStatus,
+          imageBuffer
+        });
+      }
+      
+      this.lastNotificationTime = now;
+      this.stats.statusChangesDetected++;
+      if (telegramSent) {
+        this.stats.statusNotificationsSent++;
+      }
+      
+      return true;
+      
+    } catch (error) {
+      logger.error(`Failed to send status change notification: ${error.message}`);
+      return false;
+    }
+  }
+
   async initialize() {
     try {
       logger.info('=== Elegoo Print Monitor Initializing ===');
@@ -188,9 +353,15 @@ class PrintMonitor {
       
       logger.info(`Stream URL: ${this.config.mjpegStreamUrl}`);
       logger.info(`Capture interval: ${this.config.frameCaptureInterval}ms`);
-      logger.info(`LLM Model: ${this.config.llmModel}`);
-      logger.info(`LLM URL: ${this.config.openaiUrl}`);
-      logger.info(`Notification threshold: ${this.config.notificationThreshold}`);
+      logger.info(`LLM Mode: ${this.config.llmMode}`);
+      
+      if (this.config.llmMode === 'enabled') {
+        logger.info(`LLM Model: ${this.config.llmModel}`);
+        logger.info(`LLM URL: ${this.config.openaiUrl}`);
+        logger.info(`Notification threshold: ${this.config.notificationThreshold}`);
+      } else {
+        logger.info('LLM processing: DISABLED - will only capture frames and show printer status');
+      }
       
       if (this.telegramNotifier.isConfigured()) {
         logger.info('Telegram notifications: ENABLED');
@@ -235,12 +406,18 @@ class PrintMonitor {
       logger.info('MJPEG stream: CONNECTED');
     }
     
-    // Test LLM API connection
-    const llmConnected = await this.llmClient.testConnection();
-    if (!llmConnected) {
-      logger.warn('LLM API connection test failed - will attempt to connect during analysis');
+    let llmConnected = true; // Default to true if LLM mode is disabled
+    
+    // Test LLM API connection only if LLM mode is enabled
+    if (this.config.llmMode === 'enabled') {
+      llmConnected = await this.llmClient.testConnection();
+      if (!llmConnected) {
+        logger.warn('LLM API connection test failed - will attempt to connect during analysis');
+      } else {
+        logger.info('LLM API: CONNECTED');
+      }
     } else {
-      logger.info('LLM API: CONNECTED');
+      logger.info('LLM API: SKIPPED (LLM mode disabled)');
     }
     
     // Test Telegram if configured
@@ -263,64 +440,52 @@ class PrintMonitor {
     logger.info(`Processing frame #${frameNumber}`);
     
     try {
-      const startTime = Date.now();
+      let analysis = null;
       
-      // Analyze frame with LLM
-      const analysis = await this.llmClient.analyzeImage(
-        frameBuffer,
-        prompts.systemPrompt,
-        prompts.getUserPrompt(),
-        this.debugMode
-      );
-      
-      const analysisTime = Date.now() - startTime;
-      this.lastAnalysisTime = Date.now();
-      
-      // Update statistics
-      this.stats.framesProcessed++;
-      
-      // Log analysis result
-      logger.logAnalysisResult(frameNumber, analysis);
-      logger.debug(`Analysis completed in ${analysisTime}ms`);
-      
-      // Display analysis results to console for normal mode
-      if (!this.consoleMode) {
-        this.consoleNotifier.displayFrameAnalysis(frameNumber, analysis);
-      }
-      
-      // Check for problems that need notification
-      const criticalProblems = analysis.problems.filter(
-        problem => problem.confidence >= this.config.notificationThreshold
-      );
-      
-      if (criticalProblems.length > 0) {
-        this.stats.framesWithProblems++;
-        this.stats.totalProblemsDetected += criticalProblems.length;
+      if (this.config.llmMode === 'enabled') {
+        const startTime = Date.now();
         
-        logger.warn(`Detected ${criticalProblems.length} critical problems in frame ${frameNumber}`);
+        // Analyze frame with LLM
+        analysis = await this.llmClient.analyzeImage(
+          frameBuffer,
+          prompts.systemPrompt,
+          prompts.getUserPrompt(),
+          this.debugMode
+        );
         
-        // Log each critical problem
-        criticalProblems.forEach(problem => {
-          logger.logCriticalProblem(frameNumber, problem);
-        });
+        const analysisTime = Date.now() - startTime;
+        this.lastAnalysisTime = Date.now();
         
-        // Always send alert to console
-        await this.consoleNotifier.sendAlert({
-          frameNumber,
-          problems: criticalProblems,
-          overallStatus: analysis.overall_status,
-          imageBuffer: frameBuffer,
-          analysisSummary: {
-            objectsCount: analysis.objects?.length || 0,
-            problemsCount: analysis.problems?.length || 0,
-            objects: analysis.objects || [], // Include full objects array for annotation
-            analysis: analysis // Include full analysis for annotation
-          }
-        });
+        // Update statistics
+        this.stats.framesProcessed++;
         
-        // Also send to Telegram if configured
-        if (this.telegramNotifier.isConfigured()) {
-          const notificationSent = await this.telegramNotifier.sendAlert({
+        // Log analysis result
+        logger.logAnalysisResult(frameNumber, analysis);
+        logger.debug(`Analysis completed in ${analysisTime}ms`);
+        
+        // Display analysis results to console for normal mode
+        if (!this.consoleMode) {
+          this.consoleNotifier.displayFrameAnalysis(frameNumber, analysis);
+        }
+        
+        // Check for problems that need notification
+        const criticalProblems = analysis.problems.filter(
+          problem => problem.confidence >= this.config.notificationThreshold
+        );
+        
+        if (criticalProblems.length > 0) {
+          this.stats.framesWithProblems++;
+          this.stats.totalProblemsDetected += criticalProblems.length;
+          
+          logger.warn(`Detected ${criticalProblems.length} critical problems in frame ${frameNumber}`);
+          
+          // Log each critical problem
+          criticalProblems.forEach(problem => {
+            logger.logCriticalProblem(frameNumber, problem);
+          });
+          
+          // Always send alert to console
+          await this.consoleNotifier.sendAlert({
             frameNumber,
             problems: criticalProblems,
             overallStatus: analysis.overall_status,
@@ -333,10 +498,69 @@ class PrintMonitor {
             }
           });
           
-          if (notificationSent) {
-            this.stats.notificationsSent++;
+          // Also send to Telegram if configured
+          if (this.telegramNotifier.isConfigured()) {
+            const notificationSent = await this.telegramNotifier.sendAlert({
+              frameNumber,
+              problems: criticalProblems,
+              overallStatus: analysis.overall_status,
+              imageBuffer: frameBuffer,
+              analysisSummary: {
+                objectsCount: analysis.objects?.length || 0,
+                problemsCount: analysis.problems?.length || 0,
+                objects: analysis.objects || [], // Include full objects array for annotation
+                analysis: analysis // Include full analysis for annotation
+              }
+            });
+            
+            if (notificationSent) {
+              this.stats.notificationsSent++;
+            }
           }
         }
+      } else {
+        // LLM mode disabled - just capture frame and check for status changes
+        logger.info(`Frame #${frameNumber} captured (LLM analysis disabled)`);
+        this.stats.framesProcessed++;
+        
+        // Display simple frame capture message to console only (not Telegram)
+        if (!this.consoleMode) {
+          this.consoleNotifier.displayFrameCapture(frameNumber);
+        }
+        
+        // Get printer status if available
+        let printerStatus = null;
+        if (this.printerModule) {
+          try {
+            printerStatus = await this.printerModule.getStatus();
+            logger.debug(`Printer status retrieved for frame #${frameNumber}`);
+            
+            // Check if status has changed significantly
+            const statusChanged = this.hasPrinterStatusChanged(printerStatus, this.lastPrinterStatus);
+            
+            if (statusChanged) {
+              // Send status change notification
+              await this.sendPrinterStatusChangeNotification(printerStatus, frameNumber, frameBuffer);
+            }
+            
+            // Update last status
+            this.lastPrinterStatus = printerStatus;
+            this.lastPrinterStatusTime = Date.now();
+            
+          } catch (error) {
+            logger.warn(`Failed to get printer status: ${error.message}`);
+          }
+        }
+        
+        // Only send simple console status (no Telegram) for regular frames
+        // User can request status via commands when needed
+        await this.consoleNotifier.sendSimpleStatus({
+          frameNumber,
+          imageBuffer: frameBuffer,
+          printerStatus,
+          llmEnabled: false,
+          isStatusChange: false // Regular frame, not a status change
+        });
       }
       
       // Periodic status update (every 10 frames)
@@ -463,6 +687,8 @@ class PrintMonitor {
     logger.info(`Frames with problems: ${this.stats.framesWithProblems}`);
     logger.info(`Total problems detected: ${this.stats.totalProblemsDetected}`);
     logger.info(`Notifications sent: ${this.stats.notificationsSent}`);
+    logger.info(`Status changes detected: ${this.stats.statusChangesDetected}`);
+    logger.info(`Status notifications sent: ${this.stats.statusNotificationsSent}`);
     
     if (this.stats.lastError) {
       logger.warn(`Last error (frame ${this.stats.lastError.frameNumber}): ${this.stats.lastError.error}`);
