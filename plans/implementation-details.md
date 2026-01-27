@@ -642,13 +642,33 @@ module.exports = PrinterDiscovery;
 ## Current Implementation Status
 ✅ **All planned features implemented and tested**
 ✅ **Additional features added:**
-   - Console interactive mode
-   - Image annotation with bounding boxes
-   - Telegram bot command handling
-   - Configurable alert levels
-   - Queue system for LLM requests
-   - Printer status module with WebSocket integration
-   - Printer discovery via UDP broadcast
-   - Number formatting to 2 decimal places
+    - Console interactive mode
+    - Image annotation with bounding boxes
+    - Telegram bot command handling
+    - Configurable alert levels
+    - Queue system for LLM requests
+    - Printer status module with WebSocket integration
+    - Printer discovery via UDP broadcast
+    - Number formatting to 2 decimal places
+    - **Automatic image cleanup service** (1 hour age limit, 30-minute intervals)
+    - **Smart status change detection** (prevents false positives)
+    - **WebSocket listener leak fixes** (prevents memory issues)
 
 🔧 **System is production-ready and deployed to GitHub**
+
+## Recent Fixes and Improvements
+
+### Status Change Detection Fix
+- **Problem**: False positive notifications for "Idle → Idle" when printer connection was intermittent
+- **Solution**: Added `hasHadValidPrinterStatus` flag to track first valid status
+- **Result**: Only notifies on actual machine status changes, not connection recovery
+
+### WebSocket Memory Leak Fix
+- **Problem**: MaxListenersExceededWarning due to accumulating WebSocket listeners
+- **Solution**: Removed redundant listeners and added proper cleanup
+- **Result**: Eliminated memory leaks in printer status module
+
+### Automatic Image Cleanup
+- **Problem**: Images directory growing indefinitely
+- **Solution**: Scheduled cleanup service removes files >1 hour old
+- **Result**: Automatic disk space management with detailed logging

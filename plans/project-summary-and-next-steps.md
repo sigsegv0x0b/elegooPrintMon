@@ -129,46 +129,52 @@ The Elegoo Centauri Carbon LLM Print Monitor has been successfully implemented w
 
 ### ✅ **Completed Features:**
 1. **Core Monitoring System**
-   - MJPEG stream capture with native fetch
-   - Frame capture at configurable intervals (default: 10 seconds)
-   - Robust error handling and retry logic
-   - Queue system for LLM requests to prevent overload
-   - **LLM_MODE configuration** ('enabled' or 'disabled') for AI-free operation
+    - MJPEG stream capture with native fetch
+    - Frame capture at configurable intervals (default: 10 seconds)
+    - Robust error handling and retry logic
+    - Queue system for LLM requests to prevent overload
+    - **LLM_MODE configuration** ('enabled' or 'disabled') for AI-free operation
 
 2. **AI Analysis Pipeline**
-   - Integration with LM Studio OpenAI-compatible API
-   - Support for multiple vision language models (smolvlm2-2.2b-instruct, qwen/qwen3-vl-4b, qwen/qwen3-vl-8b)
-   - Structured JSON response parsing with flexible format handling
-   - System prompt engineering for accurate print analysis
-   - LLM cooldown protection to prevent API overload
-   - **LLM disabled mode** for lightweight frame capture without AI processing
+    - Integration with LM Studio OpenAI-compatible API
+    - Support for multiple vision language models (smolvlm2-2.2b-instruct, qwen/qwen3-vl-4b, qwen/qwen3-vl-8b)
+    - Structured JSON response parsing with flexible format handling
+    - System prompt engineering for accurate print analysis
+    - LLM cooldown protection to prevent API overload
+    - **LLM disabled mode** for lightweight frame capture without AI processing
 
 3. **Notification Systems**
-   - Telegram bot integration with image sending
-   - Configurable confidence thresholds for alerts
-   - Image annotation with bounding boxes (red for problems, green for objects)
-   - Telegram bot command handling (status, capture, analyze, help, alertlevel)
-   - Console output showing LLM analysis results in normal mode
+    - Telegram bot integration with image sending
+    - Configurable confidence thresholds for alerts
+    - Image annotation with bounding boxes (red for problems, green for objects)
+    - Telegram bot command handling (status, capture, analyze, help, alertlevel)
+    - Console output showing LLM analysis results in normal mode
 
 4. **User Interfaces**
-   - Console interactive mode with command-line interface
-   - Status, capture, and analyze commands
-   - Color-coded output and progress indicators
-   - Debug mode for troubleshooting LLM responses
-   - Printer status display with rounded numbers (2 decimal places)
+    - Console interactive mode with command-line interface
+    - Status, capture, and analyze commands
+    - Color-coded output and progress indicators
+    - Debug mode for troubleshooting LLM responses
+    - Printer status display with rounded numbers (2 decimal places)
 
 5. **Printer Integration**
-   - Printer status module for Elegoo SDCP WebSocket API
-   - UDP broadcast for printer discovery
-   - Real-time temperature monitoring (nozzle, bed)
-   - Print job status tracking (progress, time remaining)
-   - Integration with Telegram and console notifiers
+    - Printer status module for Elegoo SDCP WebSocket API
+    - UDP broadcast for printer discovery
+    - Real-time temperature monitoring (nozzle, bed)
+    - Print job status tracking (progress, time remaining)
+    - Integration with Telegram and console notifiers
+    - **Smart status change detection** (prevents false positives)
 
-6. **Configuration & Management**
-   - `.env` based configuration with comprehensive options
-   - Configurable alert levels (all, warning, critical, none)
-   - Winston structured logging with file rotation
-   - GitHub repository setup with proper `.gitignore`
+6. **Automatic Maintenance**
+    - **Image cleanup service** (removes files >1 hour old every 30 minutes)
+    - **WebSocket memory leak fixes** (prevents MaxListenersExceededWarning)
+    - **Non-blocking cleanup operations** using setInterval
+
+7. **Configuration & Management**
+    - `.env` based configuration with comprehensive options
+    - Configurable alert levels (all, warning, critical, none)
+    - Winston structured logging with file rotation
+    - GitHub repository setup with proper `.gitignore`
 
 ### 🛠️ **Additional Tools:**
 - `get-telegram-chatid.sh` - Bash script to automatically retrieve Telegram chat ID
@@ -184,7 +190,7 @@ MJPEG Stream → Frame Capture → LLM Analysis → Issue Detection → Annotate
 ```
 
 ### 🔧 **Current Status:**
-The system is fully operational and ready for deployment. All components have been tested and validated. The printer status module provides real-time monitoring of printer temperatures, job progress, and system status, integrated with both Telegram commands and console interface.
+The system is fully operational and ready for deployment. All components have been tested and validated. The printer status module provides real-time monitoring of printer temperatures, job progress, and system status, integrated with both Telegram commands and console interface. Recent improvements include automatic image cleanup to prevent disk space issues, smart status change detection to eliminate false positives, and WebSocket memory leak fixes for improved stability.
 
 ## Next Steps
 

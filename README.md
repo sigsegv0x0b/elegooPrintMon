@@ -13,6 +13,8 @@ An LLM-based real-time print monitoring system for Elegoo Centauri Carbon 3D pri
 - **Configurable Alert Levels**: Control when automatic notifications are sent (all, warning, critical, none)
 - **Console Interactive Mode**: Command-line interface with status, capture, and analyze commands
 - **Printer Status Integration**: Real-time printer job status via SDCP WebSocket API
+- **Smart Status Change Detection**: Only notifies when printer machine status actually changes (Idle → Printing, etc.)
+- **Automatic Image Cleanup**: Cleans up old images (>1 hour) every 30 minutes to prevent disk space issues
 - **Configurable**: All settings via environment variables
 - **Robust Error Handling**: Retry logic and graceful degradation
 
@@ -136,7 +138,12 @@ elegooPrintMon/
 │   ├── llm/                  # LLM integration and prompts
 │   ├── analysis/             # Print analysis logic
 │   ├── notifications/        # Telegram notification system
+│   ├── printer/              # Printer status and discovery
 │   └── utils/                # Utilities and logging
+│       ├── image-cleanup.js  # Automatic image cleanup
+│       ├── logger.js         # Logging utilities
+│       └── image-annotator.js # Image annotation
+├── images/                   # Captured and annotated images
 ├── tests/                    # Test files
 ├── logs/                     # Application logs
 ├── plans/                    # Planning and architecture documents
@@ -169,7 +176,8 @@ The system supports two operating modes via the `LLM_MODE` environment variable:
 - No LLM analysis or AI processing
 - Captures frames and monitors printer status changes
 - Still supports Telegram and console commands
-- **Smart Status Change Detection**: Only sends notifications when printer machine status changes
+- **Smart Status Change Detection**: Only sends notifications when printer machine status changes (Idle → Printing, Printing → Paused, etc.)
+- **Automatic Image Cleanup**: Cleans up old images (>1 hour) every 30 minutes
 - Useful when:
   - LM Studio is not available
   - You want to reduce system resource usage
@@ -206,6 +214,11 @@ The system only detects and notifies on **machine status changes**:
 - Filename changes (print job started/ended)
 - Progress changes or milestones
 - Temperature or position changes
+
+**Smart Detection Logic:**
+- Uses loose equality comparison to handle type differences (number vs string)
+- Tracks whether valid status has ever been received to prevent false positives
+- Only notifies once per actual status change, not repeatedly during connection issues
 
 **Example Status Change Notifications:**
 ```
@@ -386,6 +399,35 @@ node printer-status.js --discover
 node printer-status.js --update-env
 ```
 
+## Automatic Image Cleanup
+
+The system includes automatic cleanup of old image files to prevent disk space issues:
+
+### Features:
+- **Age-based Cleanup**: Deletes images older than 1 hour
+- **Dual Directory Support**: Cleans both `images/` and `images/annotated/` directories
+- **Scheduled Execution**: Runs immediately on startup, then every 30 minutes
+- **Non-blocking Operation**: Uses `setInterval` to avoid blocking the main thread
+- **Detailed Logging**: Logs each deleted file with size and age information
+- **Error Handling**: Graceful handling of missing directories and file access errors
+
+### Cleanup Process:
+1. Scans both image directories
+2. Identifies files older than 1 hour based on modification time
+3. Deletes old files and logs the operation
+4. Reports total files processed and space freed
+
+### Example Cleanup Log:
+```
+[2026-01-26 18:37:37] elegoo-print-monitor info: Starting image cleanup operation
+[2026-01-26 18:37:37] elegoo-print-monitor info: Deleted old image: images/alert_1_2026-01-25T22-17-45-263Z.jpg (48.9 KB, 24.67h old)
+[2026-01-26 18:37:37] elegoo-print-monitor info: Deleted old image: images/alert_2_2026-01-25T22-18-04-360Z.jpg (42.46 KB, 24.65h old)
+[2026-01-26 18:37:37] elegoo-print-monitor info: Image cleanup completed: scanned 205 files, deleted 190 files, freed 8.95 MB, 0 errors
+```
+
+### Configuration:
+The cleanup behavior is fixed (1 hour age limit, 30-minute intervals) but can be modified in `src/utils/image-cleanup.js` if needed.
+
 ## LLM Prompt Engineering
 
 The system uses carefully crafted prompts to ensure accurate print analysis:
@@ -449,9 +491,14 @@ npm test
    - Verify bot has permission to send messages
 
 4. **High Memory Usage**
-   - Reduce FRAME_CAPTURE_INTERVAL
-   - Monitor with `npm run dev` and check logs
-   - Consider implementing frame buffer cleanup
+    - Reduce FRAME_CAPTURE_INTERVAL
+    - Monitor with `npm run dev` and check logs
+    - Automatic image cleanup prevents disk space issues
+
+5. **Disk Space Issues**
+    - The system automatically cleans up old images (>1 hour) every 30 minutes
+    - Check cleanup logs for disk space management
+    - Adjust cleanup settings in `src/utils/image-cleanup.js` if needed
 
 ### Logs
 Check the `logs/` directory for detailed application logs. Log level can be adjusted via LOG_LEVEL in .env.
@@ -461,6 +508,7 @@ Check the `logs/` directory for detailed application logs. Log level can be adju
 - **Frame Interval**: Default 10 seconds balances responsiveness with resource usage
 - **LLM Processing**: Each frame analysis takes 2-5 seconds depending on model and hardware
 - **Memory**: Each frame buffer is ~1-2MB; system cleans up buffers after processing
+- **Disk Space**: Automatic cleanup removes images >1 hour old every 30 minutes
 - **Network**: Requires stable connection to printer and LM Studio server
 
 ## Security Notes
