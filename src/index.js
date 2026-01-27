@@ -52,6 +52,7 @@ class PrintMonitor {
     this.lastPrinterStatusTime = null;
     this.lastNotificationTime = null;
     this.statusChangeNotificationCooldown = 60000; // 1 minute cooldown between status change notifications
+    this.hasHadValidPrinterStatus = false; // Track if we've ever received a valid status
     
     // Statistics
     this.stats = {
@@ -215,42 +216,49 @@ class PrintMonitor {
   hasPrinterStatusChanged(currentStatus, previousStatus) {
     // Debug logging to help diagnose issues
     logger.debug(`Checking status change: current=${currentStatus?.success ? 'valid' : 'invalid'}, previous=${previousStatus?.success ? 'valid' : 'invalid/null'}`);
-    
+
     if (!currentStatus || !currentStatus.success) {
       logger.debug('No valid current status - returning false');
       return false; // No valid current status
     }
-    
-    if (!previousStatus || !previousStatus.success) {
-      logger.debug(`First valid status or previous invalid - returning true`);
-      return true; // First status or previous was invalid
+
+    // If this is the very first valid status we've ever received, notify about it
+    if (!this.hasHadValidPrinterStatus) {
+      logger.debug('First valid printer status ever - returning true');
+      this.hasHadValidPrinterStatus = true;
+      return true;
     }
-    
+
+    if (!previousStatus || !previousStatus.success) {
+      logger.debug('Previous status invalid - not notifying (already had valid status before)');
+      return false; // We already notified about the first valid status, don't notify again
+    }
+
     // Safety check: if current and previous are the same object reference, no change
     if (currentStatus === previousStatus) {
       logger.debug('Current and previous status are the same object reference - returning false');
       return false;
     }
-    
+
     // Check machine status change (Idle -> Printing, etc.)
     const currentMachineStatus = currentStatus.status?.machine?.code;
     const previousMachineStatus = previousStatus.status?.machine?.code;
     const currentMachineText = currentStatus.status?.machine?.text || 'Unknown';
     const previousMachineText = previousStatus.status?.machine?.text || 'Unknown';
-    
+
     logger.debug(`Machine status comparison: ${previousMachineText}(${previousMachineStatus}, type: ${typeof previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus}, type: ${typeof currentMachineStatus})`);
-    
+
     // Debug: log the actual comparison
     logger.debug(`Comparison: ${currentMachineStatus} != ${previousMachineStatus} = ${currentMachineStatus != previousMachineStatus}`);
     logger.debug(`Strict comparison: ${currentMachineStatus} !== ${previousMachineStatus} = ${currentMachineStatus !== previousMachineStatus}`);
-    
+
     // Use loose equality (==) to handle cases where values might be different types (number vs string)
     // but represent the same status code
     if (currentMachineStatus != previousMachineStatus) {
       logger.info(`Machine status changed: ${previousMachineText}(${previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus})`);
       return true;
     }
-    
+
     logger.debug(`No machine status change detected (${currentMachineText} -> ${currentMachineText})`);
     return false; // No machine status change detected
   }
