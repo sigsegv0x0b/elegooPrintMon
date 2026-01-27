@@ -248,13 +248,23 @@ class PrintMonitor {
 
     logger.debug(`Machine status comparison: ${previousMachineText}(${previousMachineStatus}, type: ${typeof previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus}, type: ${typeof currentMachineStatus})`);
 
+    // Safety check: ensure status objects have the expected structure
+    if (!currentStatus.status?.machine || !previousStatus.status?.machine) {
+      logger.debug('Status object structure check failed - missing status.machine');
+      return false; // Don't notify if status objects are malformed
+    }
+
+    // Safety check: ensure both values are defined and are numbers
+    if (typeof currentMachineStatus !== 'number' || typeof previousMachineStatus !== 'number') {
+      logger.debug(`Machine status type check failed - current: ${typeof currentMachineStatus}, previous: ${typeof previousMachineStatus}`);
+      return false; // Don't notify if status codes are malformed
+    }
+
     // Debug: log the actual comparison
     logger.debug(`Comparison: ${currentMachineStatus} != ${previousMachineStatus} = ${currentMachineStatus != previousMachineStatus}`);
-    logger.debug(`Strict comparison: ${currentMachineStatus} !== ${previousMachineStatus} = ${currentMachineStatus !== previousMachineStatus}`);
 
-    // Use loose equality (==) to handle cases where values might be different types (number vs string)
-    // but represent the same status code
-    if (currentMachineStatus != previousMachineStatus) {
+    // Use strict equality for numbers to avoid type coercion issues
+    if (currentMachineStatus !== previousMachineStatus) {
       logger.info(`Machine status changed: ${previousMachineText}(${previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus})`);
       return true;
     }
