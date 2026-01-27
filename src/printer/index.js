@@ -83,6 +83,36 @@ class PrinterModule {
     }
 
     /**
+     * List files on printer
+     */
+    async listFiles() {
+        if (!this.status) {
+            throw new Error('Printer module not initialized. Call initialize() first.');
+        }
+        return await this.status.listFiles();
+    }
+
+    /**
+     * Pause print job
+     */
+    async pausePrint() {
+        if (!this.status) {
+            throw new Error('Printer module not initialized. Call initialize() first.');
+        }
+        return await this.status.pausePrint();
+    }
+
+    /**
+     * Resume print job
+     */
+    async resumePrint() {
+        if (!this.status) {
+            throw new Error('Printer module not initialized. Call initialize() first.');
+        }
+        return await this.status.resumePrint();
+    }
+
+    /**
      * Check if printer is connected
      */
     isConnected() {

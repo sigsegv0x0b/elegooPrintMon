@@ -135,7 +135,32 @@ class PrinterStatus {
                     this.messageHandlers.get('attributes')(this.attributesData);
                 }
             } else if (message.Topic?.includes('/response/')) {
-                if (this.messageHandlers.has('response')) {
+                // Handle specific command responses
+                const data = message.Data;
+                if (data && data.Cmd !== undefined) {
+                    switch (data.Cmd) {
+                        case 2: // List files response
+                            if (this.messageHandlers.has('files')) {
+                                this.messageHandlers.get('files')(data);
+                            }
+                            break;
+                        case 3: // Pause response
+                            if (this.messageHandlers.has('pause')) {
+                                this.messageHandlers.get('pause')(data);
+                            }
+                            break;
+                        case 4: // Resume response
+                            if (this.messageHandlers.has('resume')) {
+                                this.messageHandlers.get('resume')(data);
+                            }
+                            break;
+                        default:
+                            if (this.messageHandlers.has('response')) {
+                                this.messageHandlers.get('response')(data);
+                            }
+                            break;
+                    }
+                } else if (this.messageHandlers.has('response')) {
                     this.messageHandlers.get('response')(message.Data);
                 }
             }
@@ -225,6 +250,87 @@ class PrinterStatus {
             });
 
             this.sendCommand(1, {}); // Attributes command
+        });
+    }
+
+    /**
+     * List files on printer (Cmd: 2)
+     */
+    async listFiles() {
+        return new Promise((resolve, reject) => {
+            let resolved = false;
+            const timeout = setTimeout(() => {
+                if (!resolved) {
+                    resolved = true;
+                    this.messageHandlers.delete('files');
+                    reject(new Error('List files request timeout'));
+                }
+            }, this.timeout);
+
+            this.messageHandlers.set('files', (data) => {
+                if (!resolved) {
+                    resolved = true;
+                    clearTimeout(timeout);
+                    this.messageHandlers.delete('files');
+                    resolve(data);
+                }
+            });
+
+            this.sendCommand(2, {}); // List files command
+        });
+    }
+
+    /**
+     * Pause print job (Cmd: 3)
+     */
+    async pausePrint() {
+        return new Promise((resolve, reject) => {
+            let resolved = false;
+            const timeout = setTimeout(() => {
+                if (!resolved) {
+                    resolved = true;
+                    this.messageHandlers.delete('pause');
+                    reject(new Error('Pause print request timeout'));
+                }
+            }, this.timeout);
+
+            this.messageHandlers.set('pause', (data) => {
+                if (!resolved) {
+                    resolved = true;
+                    clearTimeout(timeout);
+                    this.messageHandlers.delete('pause');
+                    resolve(data);
+                }
+            });
+
+            this.sendCommand(3, {}); // Pause print command
+        });
+    }
+
+    /**
+     * Resume print job (Cmd: 4)
+     */
+    async resumePrint() {
+        return new Promise((resolve, reject) => {
+            let resolved = false;
+            const timeout = setTimeout(() => {
+                if (!resolved) {
+                    resolved = true;
+                    this.messageHandlers.delete('resume');
+                    reject(new Error('Resume print request timeout'));
+                }
+            }, this.timeout);
+
+            this.messageHandlers.set('resume', (data) => {
+                if (!resolved) {
+                    resolved = true;
+                    clearTimeout(timeout);
+                    this.messageHandlers.delete('resume');
+                    resolve(data);
+                }
+            });
+
+            this.sendCommand(4, {}); // Resume print command
         });
     }
 

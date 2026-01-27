@@ -303,6 +303,21 @@ class TelegramNotifier {
       this.handleAlertLevelCommand(msg);
     });
 
+    // List files command
+    this.bot.onText(/\/list|list/i, (msg) => {
+      this.handleListCommand(msg);
+    });
+
+    // Pause command
+    this.bot.onText(/\/pause|pause/i, (msg) => {
+      this.handlePauseCommand(msg);
+    });
+
+    // Resume command
+    this.bot.onText(/\/resume|resume/i, (msg) => {
+      this.handleResumeCommand(msg);
+    });
+
     logger.info('Telegram bot command handlers registered');
   }
 
@@ -319,7 +334,14 @@ Available commands:
 • <code>/capture</code> or <code>capture</code> - Capture and send current frame
 • <code>/analyze</code> or <code>analyze</code> - Capture, analyze, and send detailed AI analysis
 
-<b>🔔 Alert Configuration</b>
+<b>📁 File Management</b>
+• <code>/list</code> or <code>list</code> - List all files stored on the printer
+
+<b>⏯️ Print Control</b>
+• <code>/pause</code> or <code>pause</code> - Pause the current print job
+• <code>/resume</code> or <code>resume</code> - Resume a paused print job
+
+<b>� Alert Configuration</b>
 • <code>/alertlevel</code> - Configure automatic notification settings
   - <code>/alertlevel all</code> - Send alerts for all statuses
   - <code>/alertlevel warning</code> - Send alerts for warning+
@@ -1113,6 +1135,140 @@ Commands like <code>/status</code>, <code>/capture</code>, <code>/analyze</code>
       logger.error(`Failed to send status change notification: ${error.message}`);
       return false;
     }
+  }
+
+  // Handle list files command
+  async handleListCommand(msg) {
+    const chatId = msg.chat.id;
+
+    try {
+      await this.bot.sendMessage(chatId, '📁 <b>List Files Command Received</b>\nRequesting file list from printer...', {
+        parse_mode: 'HTML'
+      });
+
+      // Check if printer module is available
+      if (!this.printerModule) {
+        await this.bot.sendMessage(chatId, '⚠️ <b>Printer Not Configured</b>\nPrinter module not available. Please ensure the main application is running.', {
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      // Get file list from printer
+      const fileList = await this.printerModule.listFiles();
+
+      // Format and send response
+      const message = this.formatFileList(fileList);
+      await this.bot.sendMessage(chatId, message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      });
+
+    } catch (error) {
+      logger.error(`Failed to handle list command: ${error.message}`);
+      await this.bot.sendMessage(chatId, `❌ Failed to list files: ${error.message}`, {
+        parse_mode: 'HTML'
+      });
+    }
+  }
+
+  // Handle pause command
+  async handlePauseCommand(msg) {
+    const chatId = msg.chat.id;
+
+    try {
+      await this.bot.sendMessage(chatId, '⏸️ <b>Pause Print Command Received</b>\nSending pause command to printer...', {
+        parse_mode: 'HTML'
+      });
+
+      // Check if printer module is available
+      if (!this.printerModule) {
+        await this.bot.sendMessage(chatId, '⚠️ <b>Printer Not Configured</b>\nPrinter module not available. Please ensure the main application is running.', {
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      // Send pause command
+      const result = await this.printerModule.pausePrint();
+
+      // Send success message
+      await this.bot.sendMessage(chatId, '✅ <b>Print Paused</b>\nThe print job has been paused successfully.', {
+        parse_mode: 'HTML'
+      });
+
+    } catch (error) {
+      logger.error(`Failed to handle pause command: ${error.message}`);
+      await this.bot.sendMessage(chatId, `❌ Failed to pause print: ${error.message}`, {
+        parse_mode: 'HTML'
+      });
+    }
+  }
+
+  // Handle resume command
+  async handleResumeCommand(msg) {
+    const chatId = msg.chat.id;
+
+    try {
+      await this.bot.sendMessage(chatId, '▶️ <b>Resume Print Command Received</b>\nSending resume command to printer...', {
+        parse_mode: 'HTML'
+      });
+
+      // Check if printer module is available
+      if (!this.printerModule) {
+        await this.bot.sendMessage(chatId, '⚠️ <b>Printer Not Configured</b>\nPrinter module not available. Please ensure the main application is running.', {
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      // Send resume command
+      const result = await this.printerModule.resumePrint();
+
+      // Send success message
+      await this.bot.sendMessage(chatId, '✅ <b>Print Resumed</b>\nThe print job has been resumed successfully.', {
+        parse_mode: 'HTML'
+      });
+
+    } catch (error) {
+      logger.error(`Failed to handle resume command: ${error.message}`);
+      await this.bot.sendMessage(chatId, `❌ Failed to resume print: ${error.message}`, {
+        parse_mode: 'HTML'
+      });
+    }
+  }
+
+  // Format file list for display
+  formatFileList(fileList) {
+    if (!fileList || !fileList.Files || fileList.Files.length === 0) {
+      return '📁 <b>Printer Files</b>\n\n<i>No files found on printer</i>';
+    }
+
+    let message = `📁 <b>Printer Files (${fileList.Files.length})</b>\n\n`;
+
+    fileList.Files.forEach((file, index) => {
+      const fileName = file.Name || file.Filename || 'Unknown';
+      const fileSize = file.Size ? this.formatFileSize(file.Size) : 'Unknown size';
+      const fileDate = file.Date ? new Date(file.Date).toLocaleString() : 'Unknown date';
+
+      message += `<b>${index + 1}. ${fileName}</b>\n`;
+      message += `   📏 Size: ${fileSize}\n`;
+      message += `   📅 Date: ${fileDate}\n\n`;
+    });
+
+    message += `<i>Total files: ${fileList.Files.length}</i>`;
+    return message;
+  }
+
+  // Format file size in human readable format
+  formatFileSize(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
   // Method to set dependencies for command handling
