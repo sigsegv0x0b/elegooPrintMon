@@ -459,64 +459,86 @@ class PrintMonitor {
       let analysis = null;
       
       if (this.config.llmMode === 'enabled') {
-        const startTime = Date.now();
-        
-        // Analyze frame with LLM
-        analysis = await this.llmClient.analyzeImage(
-          frameBuffer,
-          prompts.systemPrompt,
-          prompts.getUserPrompt(),
-          this.debugMode
-        );
-        
-        const analysisTime = Date.now() - startTime;
-        this.lastAnalysisTime = Date.now();
-        
-        // Update statistics
-        this.stats.framesProcessed++;
-        
-        // Log analysis result
-        logger.logAnalysisResult(frameNumber, analysis);
-        logger.debug(`Analysis completed in ${analysisTime}ms`);
-        
-        // Display analysis results to console for normal mode
-        if (!this.consoleMode) {
-          this.consoleNotifier.displayFrameAnalysis(frameNumber, analysis);
+        // Check if we should skip LLM analysis for efficiency
+        let skipLLMAnalysis = false;
+
+        // Get printer status to check if we can skip analysis
+        let printerStatus = null;
+        if (this.printerModule) {
+          try {
+            printerStatus = await this.printerModule.getStatus();
+            logger.debug(`Printer status for analysis decision: machine=${printerStatus?.status?.machine?.code}, print=${printerStatus?.status?.print?.code}, success=${printerStatus?.success}`);
+          } catch (error) {
+            logger.debug(`Could not get printer status for analysis decision: ${error.message}`);
+          }
         }
-        
-        // Check for problems that need notification
-        const criticalProblems = analysis.problems.filter(
-          problem => problem.confidence >= this.config.notificationThreshold
-        );
-        
-        if (criticalProblems.length > 0) {
-          this.stats.framesWithProblems++;
-          this.stats.totalProblemsDetected += criticalProblems.length;
-          
-          logger.warn(`Detected ${criticalProblems.length} critical problems in frame ${frameNumber}`);
-          
-          // Log each critical problem
-          criticalProblems.forEach(problem => {
-            logger.logCriticalProblem(frameNumber, problem);
-          });
-          
-          // Always send alert to console
-          await this.consoleNotifier.sendAlert({
-            frameNumber,
-            problems: criticalProblems,
-            overallStatus: analysis.overall_status,
-            imageBuffer: frameBuffer,
-            analysisSummary: {
-              objectsCount: analysis.objects?.length || 0,
-              problemsCount: analysis.problems?.length || 0,
-              objects: analysis.objects || [], // Include full objects array for annotation
-              analysis: analysis // Include full analysis for annotation
-            }
-          });
-          
-          // Also send to Telegram if configured
-          if (this.telegramNotifier.isConfigured()) {
-            const notificationSent = await this.telegramNotifier.sendAlert({
+
+        // Only perform LLM analysis when printer is actively printing
+        let shouldAnalyze = false;
+
+        if (printerStatus && printerStatus.success) {
+          const machineStatus = printerStatus.status?.machine?.code;
+          const machineText = printerStatus.status?.machine?.text || 'Unknown';
+
+          logger.debug(`Checking analysis conditions: machineStatus=${machineStatus} (${machineText}), type: ${typeof machineStatus}`);
+
+          // Only analyze when machine is actively printing (1)
+          if (machineStatus === 1) {
+            shouldAnalyze = true;
+            logger.debug(`Performing LLM analysis - printer is actively printing (${machineText})`);
+          } else {
+            logger.info(`Skipping LLM analysis for frame ${frameNumber} - printer not actively printing (${machineText})`);
+          }
+        } else {
+          logger.debug(`Skipping LLM analysis - no valid printer status available`);
+        }
+
+        // Skip LLM analysis unless printer is actively printing
+        if (!shouldAnalyze) {
+          skipLLMAnalysis = true;
+        }
+
+        if (!skipLLMAnalysis) {
+          const startTime = Date.now();
+
+          // Analyze frame with LLM
+          analysis = await this.llmClient.analyzeImage(
+            frameBuffer,
+            prompts.systemPrompt,
+            prompts.getUserPrompt(),
+            this.debugMode
+          );
+
+          const analysisTime = Date.now() - startTime;
+          this.lastAnalysisTime = Date.now();
+
+          // Log analysis result
+          logger.logAnalysisResult(frameNumber, analysis);
+          logger.debug(`Analysis completed in ${analysisTime}ms`);
+
+          // Display analysis results to console for normal mode
+          if (!this.consoleMode) {
+            this.consoleNotifier.displayFrameAnalysis(frameNumber, analysis);
+          }
+
+          // Check for problems that need notification
+          const criticalProblems = analysis.problems.filter(
+            problem => problem.confidence >= this.config.notificationThreshold
+          );
+
+          if (criticalProblems.length > 0) {
+            this.stats.framesWithProblems++;
+            this.stats.totalProblemsDetected += criticalProblems.length;
+
+            logger.warn(`Detected ${criticalProblems.length} critical problems in frame ${frameNumber}`);
+
+            // Log each critical problem
+            criticalProblems.forEach(problem => {
+              logger.logCriticalProblem(frameNumber, problem);
+            });
+
+            // Always send alert to console
+            await this.consoleNotifier.sendAlert({
               frameNumber,
               problems: criticalProblems,
               overallStatus: analysis.overall_status,
@@ -528,12 +550,34 @@ class PrintMonitor {
                 analysis: analysis // Include full analysis for annotation
               }
             });
-            
-            if (notificationSent) {
-              this.stats.notificationsSent++;
+
+            // Also send to Telegram if configured
+            if (this.telegramNotifier.isConfigured()) {
+              const notificationSent = await this.telegramNotifier.sendAlert({
+                frameNumber,
+                problems: criticalProblems,
+                overallStatus: analysis.overall_status,
+                imageBuffer: frameBuffer,
+                analysisSummary: {
+                  objectsCount: analysis.objects?.length || 0,
+                  problemsCount: analysis.problems?.length || 0,
+                  objects: analysis.objects || [], // Include full objects array for annotation
+                  analysis: analysis // Include full analysis for annotation
+                }
+              });
+
+              if (notificationSent) {
+                this.stats.notificationsSent++;
+              }
             }
           }
+        } else {
+          // LLM analysis was skipped
+          logger.debug(`Frame ${frameNumber} processed without LLM analysis (printer idle)`);
         }
+
+        // Update statistics (count as processed regardless of LLM analysis)
+        this.stats.framesProcessed++;
       } else {
         // LLM mode disabled - just capture frame and check for status changes
         logger.info(`Frame #${frameNumber} captured (LLM analysis disabled)`);
@@ -600,7 +644,7 @@ class PrintMonitor {
 
   async sendStatusUpdate() {
     const uptime = Date.now() - this.startTime;
-    
+
     // Always send to console
     await this.consoleNotifier.sendStatusUpdate({
       frameCount: this.frameCount,
@@ -608,16 +652,9 @@ class PrintMonitor {
       lastAnalysis: this.lastAnalysisTime,
       systemStatus: 'operational'
     });
-    
-    // Also send to Telegram if configured
-    if (this.telegramNotifier.isConfigured()) {
-      await this.telegramNotifier.sendStatusUpdate({
-        frameCount: this.frameCount,
-        uptime,
-        lastAnalysis: this.lastAnalysisTime,
-        systemStatus: 'operational'
-      });
-    }
+
+    // Status updates are not sent to Telegram to avoid spam
+    // Users can request status manually via Telegram commands
   }
 
   start() {
