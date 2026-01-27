@@ -139,19 +139,24 @@ class PrinterStatus {
                 const data = message.Data;
                 if (data && data.Cmd !== undefined) {
                     switch (data.Cmd) {
-                        case 2: // List files response
+                        case 258: // List files response
                             if (this.messageHandlers.has('files')) {
                                 this.messageHandlers.get('files')(data);
                             }
                             break;
-                        case 3: // Pause response
+                        case 129: // Pause response
                             if (this.messageHandlers.has('pause')) {
                                 this.messageHandlers.get('pause')(data);
                             }
                             break;
-                        case 4: // Resume response
+                        case 131: // Resume response
                             if (this.messageHandlers.has('resume')) {
                                 this.messageHandlers.get('resume')(data);
+                            }
+                            break;
+                        case 259: // Delete files response
+                            if (this.messageHandlers.has('delete')) {
+                                this.messageHandlers.get('delete')(data);
                             }
                             break;
                         default:
@@ -254,84 +259,154 @@ class PrinterStatus {
     }
 
     /**
-     * List files on printer (Cmd: 2)
+     * List files on printer (Cmd: 258)
      */
     async listFiles() {
-        return new Promise((resolve, reject) => {
-            let resolved = false;
-            const timeout = setTimeout(() => {
-                if (!resolved) {
-                    resolved = true;
-                    this.messageHandlers.delete('files');
-                    reject(new Error('List files request timeout'));
-                }
-            }, this.timeout);
+        try {
+            // Connect if not already connected
+            if (!this.connected) {
+                await this.connect();
+            }
 
-            this.messageHandlers.set('files', (data) => {
-                if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeout);
-                    this.messageHandlers.delete('files');
-                    resolve(data);
-                }
+            return new Promise((resolve, reject) => {
+                let resolved = false;
+                const timeout = setTimeout(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        this.messageHandlers.delete('files');
+                        reject(new Error('List files request timeout'));
+                    }
+                }, this.timeout);
+
+                this.messageHandlers.set('files', (data) => {
+                    if (!resolved) {
+                        resolved = true;
+                        clearTimeout(timeout);
+                        this.messageHandlers.delete('files');
+                        resolve(data);
+                    }
+                });
+
+                this.sendCommand(258, { Url: "/usb" }); // List files command with USB storage path
             });
-
-            this.sendCommand(2, {}); // List files command
-        });
+        } catch (error) {
+            logger.error(`Failed to list files: ${error.message}`);
+            throw error;
+        }
     }
 
     /**
-     * Pause print job (Cmd: 3)
+     * Pause print job (Cmd: 129)
      */
     async pausePrint() {
-        return new Promise((resolve, reject) => {
-            let resolved = false;
-            const timeout = setTimeout(() => {
-                if (!resolved) {
-                    resolved = true;
-                    this.messageHandlers.delete('pause');
-                    reject(new Error('Pause print request timeout'));
-                }
-            }, this.timeout);
+        try {
+            // Connect if not already connected
+            if (!this.connected) {
+                await this.connect();
+            }
 
-            this.messageHandlers.set('pause', (data) => {
-                if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeout);
-                    this.messageHandlers.delete('pause');
-                    resolve(data);
-                }
+            return new Promise((resolve, reject) => {
+                let resolved = false;
+                const timeout = setTimeout(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        this.messageHandlers.delete('pause');
+                        reject(new Error('Pause print request timeout'));
+                    }
+                }, this.timeout);
+
+                this.messageHandlers.set('pause', (data) => {
+                    if (!resolved) {
+                        resolved = true;
+                        clearTimeout(timeout);
+                        this.messageHandlers.delete('pause');
+                        resolve(data);
+                    }
+                });
+
+                this.sendCommand(129, {}); // Pause print command
             });
-
-            this.sendCommand(3, {}); // Pause print command
-        });
+        } catch (error) {
+            logger.error(`Failed to pause print: ${error.message}`);
+            throw error;
+        }
     }
 
     /**
-     * Resume print job (Cmd: 4)
+     * Resume print job (Cmd: 131)
      */
     async resumePrint() {
-        return new Promise((resolve, reject) => {
-            let resolved = false;
-            const timeout = setTimeout(() => {
-                if (!resolved) {
-                    resolved = true;
-                    this.messageHandlers.delete('resume');
-                    reject(new Error('Resume print request timeout'));
-                }
-            }, this.timeout);
+        try {
+            // Connect if not already connected
+            if (!this.connected) {
+                await this.connect();
+            }
 
-            this.messageHandlers.set('resume', (data) => {
-                if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeout);
-                    this.messageHandlers.delete('resume');
-                    resolve(data);
-                }
+            return new Promise((resolve, reject) => {
+                let resolved = false;
+                const timeout = setTimeout(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        this.messageHandlers.delete('resume');
+                        reject(new Error('Resume print request timeout'));
+                    }
+                }, this.timeout);
+
+                this.messageHandlers.set('resume', (data) => {
+                    if (!resolved) {
+                        resolved = true;
+                        clearTimeout(timeout);
+                        this.messageHandlers.delete('resume');
+                        resolve(data);
+                    }
+                });
+
+                this.sendCommand(131, {}); // Resume print command
             });
+        } catch (error) {
+            logger.error(`Failed to resume print: ${error.message}`);
+            throw error;
+        }
+    }
 
-            this.sendCommand(4, {}); // Resume print command
-        });
+    /**
+     * Delete files from printer (Cmd: 259)
+     */
+    async deleteFiles(filePaths) {
+        try {
+            // Connect if not already connected
+            if (!this.connected) {
+                await this.connect();
+            }
+
+            return new Promise((resolve, reject) => {
+                let resolved = false;
+                const timeout = setTimeout(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        this.messageHandlers.delete('delete');
+                        reject(new Error('Delete files request timeout'));
+                    }
+                }, this.timeout);
+
+                this.messageHandlers.set('delete', (data) => {
+                    if (!resolved) {
+                        resolved = true;
+                        clearTimeout(timeout);
+                        this.messageHandlers.delete('delete');
+                        resolve(data);
+                    }
+                });
+
+                this.sendCommand(259, {
+                    FileList: filePaths,
+                    FolderList: []
+                }); // Delete files command
+            });
+        } catch (error) {
+            logger.error(`Failed to delete files: ${error.message}`);
+            throw error;
+        }
     }
 
     /**

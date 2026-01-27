@@ -1240,23 +1240,25 @@ Commands like <code>/status</code>, <code>/capture</code>, <code>/analyze</code>
 
   // Format file list for display
   formatFileList(fileList) {
-    if (!fileList || !fileList.Files || fileList.Files.length === 0) {
+    if (!fileList || !fileList.FileList || fileList.FileList.length === 0) {
       return '📁 <b>Printer Files</b>\n\n<i>No files found on printer</i>';
     }
 
-    let message = `📁 <b>Printer Files (${fileList.Files.length})</b>\n\n`;
+    let message = `📁 <b>Printer Files (${fileList.FileList.length})</b>\n\n`;
 
-    fileList.Files.forEach((file, index) => {
-      const fileName = file.Name || file.Filename || 'Unknown';
-      const fileSize = file.Size ? this.formatFileSize(file.Size) : 'Unknown size';
-      const fileDate = file.Date ? new Date(file.Date).toLocaleString() : 'Unknown date';
+    fileList.FileList.forEach((file, index) => {
+      const fileName = file.name || 'Unknown';
+      const fileSize = file.usedSize ? this.formatFileSize(file.usedSize) : 'Unknown size';
+      const storageType = file.storageType === 0 ? 'Internal' : file.storageType === 1 ? 'External' : 'Unknown';
+      const fileType = file.type === 0 ? '📁 Folder' : file.type === 1 ? '📄 File' : 'Unknown';
 
       message += `<b>${index + 1}. ${fileName}</b>\n`;
+      message += `   ${fileType}\n`;
       message += `   📏 Size: ${fileSize}\n`;
-      message += `   📅 Date: ${fileDate}\n\n`;
+      message += `   💾 Storage: ${storageType}\n\n`;
     });
 
-    message += `<i>Total files: ${fileList.Files.length}</i>`;
+    message += `<i>Total items: ${fileList.FileList.length}</i>`;
     return message;
   }
 
