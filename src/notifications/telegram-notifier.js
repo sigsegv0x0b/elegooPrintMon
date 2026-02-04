@@ -2,16 +2,16 @@ const TelegramBot = require('node-telegram-bot-api');
 const config = require('../config/config');
 const logger = require('../utils/logger');
 const sharp = require('sharp');
-const ImageAnnotator = require('../utils/image-annotator');
+const BaseCommunication = require('./communication');
 
-class TelegramNotifier {
+class TelegramNotifier extends BaseCommunication {
   constructor() {
+    super();
     this.botToken = config.telegramBotToken;
     this.chatId = config.telegramChatId;
     this.alertLevel = config.telegramAlertLevel || 'critical'; // 'all', 'warning', 'critical', 'none'
     this.bot = null;
     this.isInitialized = false;
-    this.imageAnnotator = new ImageAnnotator();
     this.printerModule = null;
     
     this.initialize();
@@ -141,12 +141,7 @@ class TelegramNotifier {
   }
 
   formatAlertMessage(frameNumber, problems, overallStatus, analysisSummary = null) {
-    const statusEmoji = {
-      'good': '✅',
-      'warning': '⚠️',
-      'critical': '🚨',
-      'error': '❌'
-    }[overallStatus] || '❓';
+    const statusEmoji = this.getStatusEmoji(overallStatus);
 
     let message = `<b>${statusEmoji} 3D Print Alert</b>\n`;
     message += `Frame: <code>${frameNumber}</code>\n`;
@@ -247,23 +242,6 @@ class TelegramNotifier {
     }
   }
 
-  formatUptime(ms) {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (days > 0) {
-      return `${days}d ${hours % 24}h ${minutes % 60}m`;
-    } else if (hours > 0) {
-      return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${seconds % 60}s`;
-    } else {
-      return `${seconds}s`;
-    }
-  }
-
   // Check if Telegram is configured and working
   isConfigured() {
     return this.isInitialized;
@@ -318,6 +296,11 @@ class TelegramNotifier {
       this.handleResumeCommand(msg);
     });
 
+    // Delete command
+    this.bot.onText(/\/delete|delete/i, (msg) => {
+      this.handleDeleteCommand(msg);
+    });
+
     logger.info('Telegram bot command handlers registered');
   }
 
@@ -336,6 +319,7 @@ Available commands:
 
 <b>📁 File Management</b>
 • <code>/list</code> or <code>list</code> - List all files stored on the printer
+• <code>/delete</code> or <code>delete</code> - Delete files by number (e.g., /delete 1,2,3)
 
 <b>⏯️ Print Control</b>
 • <code>/pause</code> or <code>pause</code> - Pause the current print job
@@ -807,12 +791,7 @@ Happy printing! 🖨️
       return '❌ <b>Analysis Failed</b>\nCould not analyze the current frame.';
     }
 
-    const statusEmoji = {
-      'good': '✅',
-      'warning': '⚠️',
-      'critical': '🚨',
-      'error': '❌'
-    }[analysis.overall_status] || '❓';
+    const statusEmoji = this.getStatusEmoji(analysis.overall_status);
 
     let message = `<b>${statusEmoji} Current Print Status</b>\n\n`;
     message += `<b>Overall Status:</b> ${analysis.overall_status.toUpperCase()}\n`;
@@ -856,12 +835,7 @@ Happy printing! 🖨️
       return '❌ <b>Analysis Failed</b>\nCould not analyze the current frame.';
     }
 
-    const statusEmoji = {
-      'good': '✅',
-      'warning': '⚠️',
-      'critical': '🚨',
-      'error': '❌'
-    }[analysis.overall_status] || '❓';
+    const statusEmoji = this.getStatusEmoji(analysis.overall_status);
 
     let message = `<b>${statusEmoji} Detailed AI Analysis</b>\n\n`;
     message += `<b>Overall Status:</b> ${analysis.overall_status.toUpperCase()}\n\n`;
@@ -914,14 +888,14 @@ Happy printing! 🖨️
     };
     
     const alertLevelPriority = {
-      'none': -1,
+      'none': 999, // Very high number so nothing meets it
       'critical': 2,
       'warning': 1,
       'all': 0
     };
     
     const currentStatusPriority = statusPriority[overallStatus] || 0;
-    const requiredPriority = alertLevelPriority[this.alertLevel] || 2; // Default to 'critical'
+    const requiredPriority = alertLevelPriority.hasOwnProperty(this.alertLevel) ? alertLevelPriority[this.alertLevel] : 2; // Default to 'critical'
     
     return currentStatusPriority >= requiredPriority;
   }
@@ -1157,12 +1131,14 @@ Commands like <code>/status</code>, <code>/capture</code>, <code>/analyze</code>
       // Get file list from printer
       const fileList = await this.printerModule.listFiles();
 
-      // Format and send response
-      const message = this.formatFileList(fileList);
-      await this.bot.sendMessage(chatId, message, {
-        parse_mode: 'HTML',
-        disable_web_page_preview: true
-      });
+      // Format and send response (may be multiple messages due to length limits)
+      const messages = this.formatFileList(fileList);
+      for (const message of messages) {
+        await this.bot.sendMessage(chatId, message, {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        });
+      }
 
     } catch (error) {
       logger.error(`Failed to handle list command: ${error.message}`);
@@ -1238,28 +1214,149 @@ Commands like <code>/status</code>, <code>/capture</code>, <code>/analyze</code>
     }
   }
 
-  // Format file list for display
+  // Handle delete command
+  async handleDeleteCommand(msg) {
+    const chatId = msg.chat.id;
+    const text = msg.text || '';
+
+    try {
+      // Parse the command to get file numbers
+      const match = text.match(/\/delete\s+(.+)/i) || text.match(/delete\s+(.+)/i);
+      if (!match) {
+        await this.bot.sendMessage(chatId, '❌ <b>Invalid Format</b>\nUsage: <code>/delete 1,2,3</code> or <code>delete 1 2 3</code>\n\nFirst use <code>/list</code> to see file numbers.', {
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      const fileNumbers = match[1].split(/[, ]+/).map(n => parseInt(n.trim())).filter(n => !isNaN(n) && n > 0);
+
+      if (fileNumbers.length === 0) {
+        await this.bot.sendMessage(chatId, '❌ <b>No Valid File Numbers</b>\nPlease specify file numbers to delete (e.g., /delete 1,2,3).', {
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      await this.bot.sendMessage(chatId, `🗑️ <b>Delete Files Command Received</b>\nDeleting files: ${fileNumbers.join(', ')}...`, {
+        parse_mode: 'HTML'
+      });
+
+      // Check if printer module is available
+      if (!this.printerModule) {
+        await this.bot.sendMessage(chatId, '⚠️ <b>Printer Not Configured</b>\nPrinter module not available. Please ensure the main application is running.', {
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      // First get the current file list to map numbers to file paths
+      const fileList = await this.printerModule.listFiles();
+      const files = fileList.FileList || (fileList.Data && fileList.Data.FileList) || [];
+
+      if (files.length === 0) {
+        await this.bot.sendMessage(chatId, '❌ <b>No Files Found</b>\nCannot delete files - no files available on printer.', {
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      // Map file numbers to file paths
+      const filesToDelete = [];
+      const invalidNumbers = [];
+
+      fileNumbers.forEach(num => {
+        if (num <= files.length) {
+          const filePath = files[num - 1].name;
+          filesToDelete.push(filePath);
+          logger.info(`Mapping file ${num} to path: ${filePath}`);
+        } else {
+          invalidNumbers.push(num);
+        }
+      });
+
+      if (invalidNumbers.length > 0) {
+        await this.bot.sendMessage(chatId, `⚠️ <b>Invalid File Numbers</b>\nThese file numbers don't exist: ${invalidNumbers.join(', ')}\nValid range: 1-${files.length}`, {
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      // Send delete command
+      logger.info(`Sending delete command for files: ${filesToDelete.join(', ')}`);
+      const result = await this.printerModule.deleteFiles(filesToDelete);
+      logger.info(`Delete result: ${JSON.stringify(result)}`);
+
+      // Check result
+      if (result && result.Data && result.Data.ErrData && result.Data.ErrData.length > 0) {
+        // Some files failed to delete
+        const failedFiles = result.Data.ErrData;
+        await this.bot.sendMessage(chatId, `⚠️ <b>Partial Success</b>\nDeleted ${filesToDelete.length - failedFiles.length} files.\nFailed to delete: ${failedFiles.join(', ')}`, {
+          parse_mode: 'HTML'
+        });
+      } else if (result && result.Data && result.Data.Ack === 0) {
+        // All files deleted successfully
+        await this.bot.sendMessage(chatId, `✅ <b>Files Deleted</b>\nSuccessfully deleted ${filesToDelete.length} file(s).`, {
+          parse_mode: 'HTML'
+        });
+      } else {
+        // Unknown result
+        await this.bot.sendMessage(chatId, `⚠️ <b>Delete Result Unknown</b>\nCommand sent but result unclear. Please check with /list.`, {
+          parse_mode: 'HTML'
+        });
+      }
+
+    } catch (error) {
+      logger.error(`Failed to handle delete command: ${error.message}`);
+      await this.bot.sendMessage(chatId, `❌ Failed to delete files: ${error.message}`, {
+        parse_mode: 'HTML'
+      });
+    }
+  }
+
+  // Format file list for display - returns array of messages to handle Telegram length limits
   formatFileList(fileList) {
-    if (!fileList || !fileList.FileList || fileList.FileList.length === 0) {
-      return '📁 <b>Printer Files</b>\n\n<i>No files found on printer</i>';
+    // Handle both direct FileList and nested Data.FileList structures
+    const files = fileList.FileList || (fileList.Data && fileList.Data.FileList) || [];
+
+    if (!files || files.length === 0) {
+      return ['📁 <b>Printer Files</b>\n\n<i>No files found on printer</i>'];
     }
 
-    let message = `📁 <b>Printer Files (${fileList.FileList.length})</b>\n\n`;
+    const messages = [];
+    let currentMessage = `📁 <b>Printer Files (${files.length})</b>\n\n`;
+    currentMessage += `<i>Use /delete followed by file numbers to delete (e.g., /delete 1,2,3)</i>\n\n`;
 
-    fileList.FileList.forEach((file, index) => {
+    // Telegram message limit is 4096 characters
+    const MAX_MESSAGE_LENGTH = 3500; // Leave some buffer
+
+    files.forEach((file, index) => {
       const fileName = file.name || 'Unknown';
-      const fileSize = file.usedSize ? this.formatFileSize(file.usedSize) : 'Unknown size';
-      const storageType = file.storageType === 0 ? 'Internal' : file.storageType === 1 ? 'External' : 'Unknown';
-      const fileType = file.type === 0 ? '📁 Folder' : file.type === 1 ? '📄 File' : 'Unknown';
+      const fileSize = file.FileSize ? this.formatFileSize(file.FileSize) : 'Unknown size';
+      const fileType = file.type === 0 ? '📁 Folder' : file.type === 1 ? '📄 File' : '📄 File';
+      const createTime = file.CreateTime ? new Date(file.CreateTime * 1000).toLocaleDateString() : 'Unknown date';
 
-      message += `<b>${index + 1}. ${fileName}</b>\n`;
-      message += `   ${fileType}\n`;
-      message += `   📏 Size: ${fileSize}\n`;
-      message += `   💾 Storage: ${storageType}\n\n`;
+      const fileEntry = `<b>${index + 1}. ${fileName.replace('/local//', '').replace('/usb//', '')}</b>\n`;
+      const fileDetails = `   ${fileType}\n   📏 Size: ${fileSize}\n   📅 Created: ${createTime}\n\n`;
+
+      // Check if adding this file would exceed the message limit
+      if (currentMessage.length + fileEntry.length + fileDetails.length > MAX_MESSAGE_LENGTH) {
+        // Add footer to current message and start a new one
+        currentMessage += `<i>Continued in next message...</i>`;
+        messages.push(currentMessage);
+
+        // Start new message with header
+        currentMessage = `📁 <b>Files (continued)</b>\n\n`;
+      }
+
+      currentMessage += fileEntry + fileDetails;
     });
 
-    message += `<i>Total items: ${fileList.FileList.length}</i>`;
-    return message;
+    // Add footer to the last message
+    currentMessage += `<i>Total files: ${files.length} | Use /delete to remove files</i>`;
+    messages.push(currentMessage);
+
+    return messages;
   }
 
   // Format file size in human readable format
