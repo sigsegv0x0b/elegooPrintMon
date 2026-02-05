@@ -225,7 +225,7 @@ class PrintMonitor {
   /**
    * Check if printer status has changed significantly
    * Returns true if status changed and should trigger notification
-   * Only checks the machine field (status.machine.code) as requested
+   * Checks both machine field (status.machine.code) and print field (status.print.code)
    */
   hasPrinterStatusChanged(currentStatus, previousStatus) {
     // Debug logging to help diagnose issues
@@ -260,7 +260,14 @@ class PrintMonitor {
     const currentMachineText = currentStatus.status?.machine?.text || 'Unknown';
     const previousMachineText = previousStatus.status?.machine?.text || 'Unknown';
 
-    logger.debug(`Machine status comparison: ${previousMachineText}(${previousMachineStatus}, type: ${typeof previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus}, type: ${typeof currentMachineStatus})`);
+    // Check print status change (Idle -> Paused, etc.)
+    const currentPrintStatus = currentStatus.status?.print?.code;
+    const previousPrintStatus = previousStatus.status?.print?.code;
+    const currentPrintText = currentStatus.status?.print?.text || 'Unknown';
+    const previousPrintText = previousStatus.status?.print?.text || 'Unknown';
+
+    logger.debug(`Machine status comparison: ${previousMachineText}(${previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus})`);
+    logger.debug(`Print status comparison: ${previousPrintText}(${previousPrintStatus}) -> ${currentPrintText}(${currentPrintStatus})`);
 
     // Safety check: ensure status objects have the expected structure
     if (!currentStatus.status?.machine || !previousStatus.status?.machine) {
@@ -268,23 +275,34 @@ class PrintMonitor {
       return false; // Don't notify if status objects are malformed
     }
 
-    // Safety check: ensure both values are defined and are numbers
+    // Safety check: ensure machine status values are defined and are numbers
     if (typeof currentMachineStatus !== 'number' || typeof previousMachineStatus !== 'number') {
       logger.debug(`Machine status type check failed - current: ${typeof currentMachineStatus}, previous: ${typeof previousMachineStatus}`);
       return false; // Don't notify if status codes are malformed
     }
 
-    // Debug: log the actual comparison
-    logger.debug(`Comparison: ${currentMachineStatus} != ${previousMachineStatus} = ${currentMachineStatus != previousMachineStatus}`);
+    // Check if machine status changed
+    const machineChanged = currentMachineStatus !== previousMachineStatus;
+    
+    // Check if print status changed (only if both are defined)
+    let printChanged = false;
+    if (typeof currentPrintStatus === 'number' && typeof previousPrintStatus === 'number') {
+      printChanged = currentPrintStatus !== previousPrintStatus;
+    }
 
-    // Use strict equality for numbers to avoid type coercion issues
-    if (currentMachineStatus !== previousMachineStatus) {
-      logger.info(`Machine status changed: ${previousMachineText}(${previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus})`);
+    // Return true if either machine or print status changed
+    if (machineChanged || printChanged) {
+      if (machineChanged) {
+        logger.info(`Machine status changed: ${previousMachineText}(${previousMachineStatus}) -> ${currentMachineText}(${currentMachineStatus})`);
+      }
+      if (printChanged) {
+        logger.info(`Print status changed: ${previousPrintText}(${previousPrintStatus}) -> ${currentPrintText}(${currentPrintStatus})`);
+      }
       return true;
     }
 
-    logger.debug(`No machine status change detected (${currentMachineText} -> ${currentMachineText})`);
-    return false; // No machine status change detected
+    logger.debug(`No machine or print status change detected`);
+    return false; // No status change detected
   }
 
   /**
@@ -492,27 +510,38 @@ class PrintMonitor {
       // Get machine status texts for change description
       const currentMachineText = currentStatus.status?.machine?.text || 'Unknown';
       const previousMachineText = previousStatus?.status?.machine?.text || 'Unknown';
-      const currentMachineCode = currentStatus.status?.machine?.code;
-      const previousMachineCode = previousStatus?.status?.machine?.code;
+      const currentPrintText = currentStatus.status?.print?.text || 'Unknown';
+      const previousPrintText = previousStatus?.status?.print?.text || 'Unknown';
       
       // Format status message with change information
       let message = `🔄 **Printer Status Change Detected**\n`;
       message += `Frame: #${frameNumber}\n`;
       message += `Time: ${new Date().toLocaleString()}\n\n`;
       
-      // Show what changed
-      message += `📋 **Changed:** ${previousMachineText} → ${currentMachineText}\n`;
+      // Show what changed (both machine and print status)
+      const changes = [];
+      if (previousMachineText !== currentMachineText) {
+        changes.push(`Machine: ${previousMachineText} → ${currentMachineText}`);
+      }
+      if (previousPrintText !== currentPrintText) {
+        changes.push(`Print: ${previousPrintText} → ${currentPrintText}`);
+      }
+      
+      if (changes.length > 0) {
+        message += `📋 **Changed:**\n`;
+        changes.forEach(change => {
+          message += `   ${change}\n`;
+        });
+        message += '\n';
+      }
       
       if (currentStatus.printer?.name) {
         message += `🖨️ ${currentStatus.printer.name}\n`;
       }
       
-      // Show current machine status (already shown in Changed field, but include for clarity)
+      // Show current status
       message += `📋 Machine: ${currentMachineText}\n`;
-      
-      if (currentStatus.status?.print?.text) {
-        message += `🖨️ Print: ${currentStatus.status.print.text}\n`;
-      }
+      message += `🖨️ Print: ${currentPrintText}\n`;
       
       if (currentStatus.status?.print?.filename) {
         message += `📄 File: ${currentStatus.status.print.filename}\n`;

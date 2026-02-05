@@ -577,24 +577,27 @@ class PrinterStatus {
         return statusMap[status] || `Unknown (${status})`;
     }
 
-    /**
-     * Format time in seconds to human readable format
-     */
-    formatTime(seconds) {
-        if (!seconds || seconds <= 0) return '0s';
-        
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const secs = seconds % 60;
+  /**
+   * Format time in seconds to human readable format
+   */
+  formatTime(seconds) {
+    if (!seconds || seconds <= 0) return '0s';
+    
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
 
-        if (hours > 0) {
-            return `${hours}h ${minutes}m ${secs}s`;
-        } else if (minutes > 0) {
-            return `${minutes}m ${secs}s`;
-        } else {
-            return `${secs}s`;
-        }
+    // Format seconds with 2 decimal places
+    const formattedSecs = secs.toFixed(2);
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${formattedSecs}s`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${formattedSecs}s`;
+    } else {
+      return `${formattedSecs}s`;
     }
+  }
 
     /**
      * Format status for text output (for commands)
