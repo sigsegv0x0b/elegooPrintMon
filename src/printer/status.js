@@ -445,7 +445,11 @@ class PrinterStatus {
         }
 
         // Get machine status
-        const machineStatus = status.Status?.CurrentStatus || status.CurrentStatus || 0;
+        let machineStatus = status.Status?.CurrentStatus || status.CurrentStatus || 0;
+        // Handle case where machine status might be an array
+        if (Array.isArray(machineStatus)) {
+            machineStatus = machineStatus[0] || 0;
+        }
         const machineStatusText = this.getMachineStatusText(machineStatus);
 
         // Get print info
@@ -457,7 +461,12 @@ class PrinterStatus {
         let timeInfo = null;
 
         if (printInfo) {
-            printStatus = printInfo.Status || 0;
+            let rawPrintStatus = printInfo.Status || 0;
+            // Handle case where print status might be an array
+            if (Array.isArray(rawPrintStatus)) {
+                rawPrintStatus = rawPrintStatus[0] || 0;
+            }
+            printStatus = rawPrintStatus;
             printStatusText = this.getPrintStatusText(printStatus);
             filename = printInfo.Filename || null;
             
@@ -572,7 +581,17 @@ class PrinterStatus {
             7: 'Stopping',
             8: 'Stopped',
             9: 'Complete',
-            10: 'File Checking'
+            10: 'File Checking',
+            11: 'Heating',
+            12: 'Cooling',
+            13: 'Calibrating',
+            14: 'Preheating',
+            15: 'Filament Changing',
+            16: 'Leveling',
+            17: 'Printing',
+            18: 'Printing', // Some firmware use 18 for printing
+            19: 'Waiting',
+            20: 'Resuming'
         };
         return statusMap[status] || `Unknown (${status})`;
     }
