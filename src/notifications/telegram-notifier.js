@@ -463,6 +463,55 @@ Happy printing! 🖨️
         await this.bot.sendMessage(chatId, '✅ <b>Frame captured successfully!</b>\nLLM analysis is disabled. Image shows current print view.', {
           parse_mode: 'HTML'
         });
+        
+        // Run PrintGuard analysis if enabled
+        if (config.usePrintGuard && this.printMonitor && this.printMonitor.printGuard) {
+          try {
+            await this.bot.sendMessage(chatId, '🔍 <b>Running PrintGuard analysis...</b>', {
+              parse_mode: 'HTML'
+            });
+            
+            // Get printer status object for PrintGuard
+            let printerStatusObj = null;
+            if (this.printerModule) {
+              try {
+                printerStatusObj = await this.printerModule.getStatus();
+              } catch (statusError) {
+                logger.warn(`Could not get printer status for PrintGuard: ${statusError.message}`);
+              }
+            }
+            
+            // Run PrintGuard analysis (force analysis for manual status command)
+            const printGuardResult = await this.printMonitor.runPrintGuardAnalysis(frameBuffer, 'telegram_status', printerStatusObj, true);
+            if (printGuardResult) {
+              const pgMessage = `📊 <b>PrintGuard Analysis:</b>\n` +
+                               `   Prediction: <code>${printGuardResult.finalPrediction.className}</code>\n` +
+                               `   Status: ${printGuardResult.isFailure ? '🚨 FAILURE' : '✅ SUCCESS'}\n` +
+                               `   Processing time: ${printGuardResult.processingTime}ms\n\n` +
+                               `<b>📏 Distances to prototypes:</b>\n`;
+              
+              // Add distances for each class
+              let distancesMessage = '';
+              printGuardResult.distances.forEach((distance, i) => {
+                const className = printGuardResult.classNames?.[i] || printGuardResult.class_names?.[i] || `Class ${i}`;
+                const isPredicted = i === printGuardResult.finalPrediction.index;
+                const marker = isPredicted ? ' ← PREDICTED' : '';
+                distancesMessage += `   ${className}: ${distance.toFixed(4)}${marker}\n`;
+              });
+              
+              await this.bot.sendMessage(chatId, pgMessage + distancesMessage, {
+                parse_mode: 'HTML',
+                disable_web_page_preview: true
+              });
+            }
+          } catch (pgError) {
+            logger.warn(`PrintGuard analysis failed for Telegram status: ${pgError.message}`);
+            await this.bot.sendMessage(chatId, `⚠️ <b>PrintGuard analysis failed:</b> ${pgError.message}`, {
+              parse_mode: 'HTML'
+            });
+          }
+        }
+        
         return;
       }
 
@@ -556,7 +605,7 @@ Happy printing! 🖨️
             caption: '📊 AI Analysis - Original Frame'
           });
         }
-      } else {
+       } else {
         // Send original image if no analysis data
         const resizedImage = await sharp(result.frameBuffer)
           .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
@@ -566,6 +615,54 @@ Happy printing! 🖨️
         await this.bot.sendPhoto(chatId, resizedImage, {
           caption: '📊 AI Analysis'
         });
+      }
+      
+      // Run PrintGuard analysis if enabled
+      if (config.usePrintGuard && this.printMonitor && this.printMonitor.printGuard) {
+        try {
+          await this.bot.sendMessage(chatId, '🔍 <b>Running PrintGuard analysis...</b>', {
+            parse_mode: 'HTML'
+          });
+          
+          // Get printer status object for PrintGuard
+          let printerStatusObj = null;
+          if (this.printerModule) {
+            try {
+              printerStatusObj = await this.printerModule.getStatus();
+            } catch (statusError) {
+              logger.warn(`Could not get printer status for PrintGuard: ${statusError.message}`);
+            }
+          }
+          
+          // Run PrintGuard analysis (force analysis for manual status command)
+          const printGuardResult = await this.printMonitor.runPrintGuardAnalysis(result.frameBuffer, 'telegram_status', printerStatusObj, true);
+          if (printGuardResult) {
+            const pgMessage = `📊 <b>PrintGuard Analysis:</b>\n` +
+                             `   Prediction: <code>${printGuardResult.finalPrediction.className}</code>\n` +
+                             `   Status: ${printGuardResult.isFailure ? '🚨 FAILURE' : '✅ SUCCESS'}\n` +
+                             `   Processing time: ${printGuardResult.processingTime}ms\n\n` +
+                             `<b>📏 Distances to prototypes:</b>\n`;
+            
+            // Add distances for each class
+            let distancesMessage = '';
+            printGuardResult.distances.forEach((distance, i) => {
+              const className = printGuardResult.classNames?.[i] || printGuardResult.class_names?.[i] || `Class ${i}`;
+              const isPredicted = i === printGuardResult.finalPrediction.index;
+              const marker = isPredicted ? ' ← PREDICTED' : '';
+              distancesMessage += `   ${className}: ${distance.toFixed(4)}${marker}\n`;
+            });
+            
+            await this.bot.sendMessage(chatId, pgMessage + distancesMessage, {
+              parse_mode: 'HTML',
+              disable_web_page_preview: true
+            });
+          }
+        } catch (pgError) {
+          logger.warn(`PrintGuard analysis failed for Telegram status: ${pgError.message}`);
+          await this.bot.sendMessage(chatId, `⚠️ <b>PrintGuard analysis failed:</b> ${pgError.message}`, {
+            parse_mode: 'HTML'
+          });
+        }
       }
 
     } catch (error) {
@@ -1148,7 +1245,7 @@ Commands like <code>/status</code>, <code>/capture</code>, <code>/analyze</code>
         // Add distances for each class
         let distancesMessage = '';
         printGuardResult.distances.forEach((distance, i) => {
-          const className = printGuardResult.classNames[i] || `Class ${i}`;
+          const className = printGuardResult.classNames?.[i] || printGuardResult.class_names?.[i] || `Class ${i}`;
           const isPredicted = i === printGuardResult.finalPrediction.index;
           const marker = isPredicted ? ' ← PREDICTED' : '';
           distancesMessage += `   ${className}: ${distance.toFixed(4)}${marker}\n`;

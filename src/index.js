@@ -349,7 +349,7 @@ class PrintMonitor {
       
       message += `\n📊 **Distances:**\n`;
       printGuardResult.distances.forEach((distance, i) => {
-        const className = printGuardResult.classNames[i] || `Class ${i}`;
+        const className = printGuardResult.classNames?.[i] || printGuardResult.class_names?.[i] || `Class ${i}`;
         const isPredicted = i === printGuardResult.finalPrediction.index;
         const marker = isPredicted ? ' ← PREDICTED' : '';
         message += `  ${className}: ${distance.toFixed(4)}${marker}\n`;
@@ -407,10 +407,23 @@ class PrintMonitor {
 
   /**
    * Run PrintGuard analysis on a frame
+   * @param {Buffer} frameBuffer - The image buffer to analyze
+   * @param {string|number} frameNumber - Frame number or identifier
+   * @param {Object} printerStatus - Printer status object (optional)
+   * @param {boolean} forceAnalysis - Force analysis even if printer not printing (for manual commands)
    */
-  async runPrintGuardAnalysis(frameBuffer, frameNumber, printerStatus) {
+  async runPrintGuardAnalysis(frameBuffer, frameNumber, printerStatus, forceAnalysis = false) {
     if (!this.printGuard) {
       return;
+    }
+
+    // Check if printer is actively printing (unless forced)
+    if (!forceAnalysis && printerStatus && printerStatus.success) {
+      const machineCode = printerStatus.status?.machine?.code;
+      if (machineCode !== 1) { // 1 = printing
+        logger.debug(`Skipping PrintGuard analysis for frame #${frameNumber} - printer not actively printing (machine code: ${machineCode})`);
+        return null;
+      }
     }
 
     try {
@@ -439,7 +452,7 @@ class PrintMonitor {
       
       // Log PrintGuard result
       logger.info(`PrintGuard analysis for frame #${frameNumber}: ${result.finalPrediction.className} (${result.isFailure ? 'FAILURE' : 'SUCCESS'}) in ${analysisTime}ms`);
-      logger.debug(`Distances: ${result.distances.map((d, i) => `${result.classNames[i]}: ${d.toFixed(4)}`).join(', ')}`);
+      logger.debug(`Distances: ${result.distances.map((d, i) => `${result.classNames?.[i] || result.class_names?.[i] || `Class ${i}`}: ${d.toFixed(4)}`).join(', ')}`);
       
       // Check if failure detected
       if (result.isFailure) {
@@ -800,7 +813,7 @@ class PrintMonitor {
         
         // Run PrintGuard analysis if enabled and printer is actively printing
         if (this.printGuard && printerStatus && printerStatus.success && printerStatus.status?.machine?.code === 1) {
-          await this.runPrintGuardAnalysis(frameBuffer, frameNumber, printerStatus);
+          await this.runPrintGuardAnalysis(frameBuffer, frameNumber, printerStatus, false); // Don't force for automatic processing
         }
       } else {
         // LLM mode disabled - just capture frame and check for status changes
@@ -848,7 +861,7 @@ class PrintMonitor {
         
         // Run PrintGuard analysis if enabled and printer is actively printing
         if (this.printGuard && printerStatus && printerStatus.success && printerStatus.status?.machine?.code === 1) {
-          await this.runPrintGuardAnalysis(frameBuffer, frameNumber, printerStatus);
+          await this.runPrintGuardAnalysis(frameBuffer, frameNumber, printerStatus, false); // Don't force for automatic processing
         }
       }
       

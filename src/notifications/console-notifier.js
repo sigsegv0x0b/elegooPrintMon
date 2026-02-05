@@ -133,6 +133,7 @@ class ConsoleNotifier extends BaseCommunication {
     // Check if LLM is enabled
     const config = require('../config/config');
     const llmEnabled = config.llmMode === 'enabled';
+    const printGuardEnabled = config.usePrintGuard;
 
     if (!llmEnabled) {
       console.log('\n🤖 LLM analysis: DISABLED');
@@ -149,6 +150,42 @@ class ConsoleNotifier extends BaseCommunication {
         const imagePath = await this.saveImage(frameBuffer, 'status', 'status');
         console.log(`✅ Status image saved: ${imagePath}`);
         console.log(`📁 Location: ${imagePath}`);
+        
+        // Run PrintGuard analysis if enabled
+        if (printGuardEnabled && printMonitor && printMonitor.printGuard) {
+          console.log('\n🔍 Running PrintGuard analysis...');
+          try {
+            // Get printer status object for PrintGuard
+            let printerStatusObj = null;
+            if (printerModule) {
+              try {
+                printerStatusObj = await printerModule.getStatus();
+              } catch (statusError) {
+                console.log(`⚠️  Could not get printer status for PrintGuard: ${statusError.message}`);
+              }
+            }
+            
+            // Run PrintGuard analysis (force analysis for manual status command)
+            const printGuardResult = await printMonitor.runPrintGuardAnalysis(frameBuffer, 'status', printerStatusObj, true);
+            if (printGuardResult) {
+              console.log(`\n📊 PrintGuard Analysis:`);
+              console.log(`   Prediction: ${printGuardResult.finalPrediction.className}`);
+              console.log(`   Status: ${printGuardResult.isFailure ? 'FAILURE 🚨' : 'SUCCESS ✅'}`);
+              console.log(`   Processing time: ${printGuardResult.processingTime}ms`);
+              
+              // Show distances
+              console.log(`\n📏 Distances to prototypes:`);
+              printGuardResult.distances.forEach((distance, i) => {
+                const className = printGuardResult.classNames?.[i] || printGuardResult.class_names?.[i] || `Class ${i}`;
+                const isPredicted = i === printGuardResult.finalPrediction.index;
+                const marker = isPredicted ? ' ← PREDICTED' : '';
+                console.log(`   ${className}: ${distance.toFixed(4)}${marker}`);
+              });
+            }
+          } catch (pgError) {
+            console.log(`⚠️  PrintGuard analysis failed: ${pgError.message}`);
+          }
+        }
         
         return;
       } catch (error) {
@@ -200,6 +237,42 @@ class ConsoleNotifier extends BaseCommunication {
           console.log(`🎨 Annotated status image saved: ${annotatedPath}`);
         } catch (error) {
           console.log(`⚠️  Failed to save annotated image: ${error.message}`);
+        }
+      }
+      
+      // Run PrintGuard analysis if enabled
+      if (printGuardEnabled && printMonitor && printMonitor.printGuard) {
+        console.log('\n🔍 Running PrintGuard analysis...');
+        try {
+          // Get printer status object for PrintGuard
+          let printerStatusObj = null;
+          if (printerModule) {
+            try {
+              printerStatusObj = await printerModule.getStatus();
+            } catch (statusError) {
+              console.log(`⚠️  Could not get printer status for PrintGuard: ${statusError.message}`);
+            }
+          }
+          
+          // Run PrintGuard analysis (force analysis for manual status command)
+          const printGuardResult = await printMonitor.runPrintGuardAnalysis(result.frameBuffer, 'status', printerStatusObj, true);
+          if (printGuardResult) {
+            console.log(`\n📊 PrintGuard Analysis:`);
+            console.log(`   Prediction: ${printGuardResult.finalPrediction.className}`);
+            console.log(`   Status: ${printGuardResult.isFailure ? 'FAILURE 🚨' : 'SUCCESS ✅'}`);
+            console.log(`   Processing time: ${printGuardResult.processingTime}ms`);
+            
+            // Show distances
+            console.log(`\n📏 Distances to prototypes:`);
+            printGuardResult.distances.forEach((distance, i) => {
+              const className = printGuardResult.classNames?.[i] || printGuardResult.class_names?.[i] || `Class ${i}`;
+              const isPredicted = i === printGuardResult.finalPrediction.index;
+              const marker = isPredicted ? ' ← PREDICTED' : '';
+              console.log(`   ${className}: ${distance.toFixed(4)}${marker}`);
+            });
+          }
+        } catch (pgError) {
+          console.log(`⚠️  PrintGuard analysis failed: ${pgError.message}`);
         }
       }
 
@@ -416,7 +489,7 @@ class ConsoleNotifier extends BaseCommunication {
     // Display distances
     console.log(`\n📏 Distances to prototypes:`);
     printGuardResult.distances.forEach((distance, i) => {
-      const className = printGuardResult.classNames[i] || `Class ${i}`;
+      const className = printGuardResult.classNames?.[i] || printGuardResult.class_names?.[i] || `Class ${i}`;
       const isPredicted = i === printGuardResult.finalPrediction.index;
       const marker = isPredicted ? ' ← PREDICTED' : '';
       console.log(`   ${className}: ${distance.toFixed(4)}${marker}`);

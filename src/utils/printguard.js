@@ -242,7 +242,7 @@ class PrintGuardInference {
             distances.push(euclideanDistance(embedding, prototype));
         }
         
-        console.log(`Distances to prototypes: ${distances.map((d, i) => `${this.classNames[i]}: ${d.toFixed(4)}`).join(', ')}`);
+        console.log(`Distances to prototypes: ${distances.map((d, i) => `${this.classNames?.[i] || `Class ${i}`}: ${d.toFixed(4)}`).join(', ')}`);
         
         // Step 3: Initial prediction (nearest prototype)
         const initialPrediction = distances.indexOf(Math.min(...distances));
@@ -266,6 +266,7 @@ class PrintGuardInference {
         return {
             embedding,
             distances,
+            classNames: this.classNames, // Include class names in result
             initialPrediction: {
                 index: initialPrediction,
                 className: this.classNames[initialPrediction]
