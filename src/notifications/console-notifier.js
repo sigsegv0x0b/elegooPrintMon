@@ -1,29 +1,10 @@
-const fs = require('fs').promises;
-const path = require('path');
-const config = require('../config/config');
-const logger = require('../utils/logger');
-const sharp = require('sharp');
-const ImageAnnotator = require('../utils/image-annotator');
+const BaseCommunication = require('./communication');
 
-class ConsoleNotifier {
+class ConsoleNotifier extends BaseCommunication {
   constructor() {
-    this.imagesDir = path.join(__dirname, '../../images');
-    this.annotatedImagesDir = path.join(__dirname, '../../images/annotated');
+    super();
     this.ensureImagesDirectory();
-    this.commandHandlers = new Map();
     this.setupCommandHandlers();
-    this.imageAnnotator = new ImageAnnotator();
-  }
-
-  async ensureImagesDirectory() {
-    try {
-      await fs.mkdir(this.imagesDir, { recursive: true });
-      await fs.mkdir(this.annotatedImagesDir, { recursive: true });
-      logger.info(`Console images directory: ${this.imagesDir}`);
-      logger.info(`Annotated images directory: ${this.annotatedImagesDir}`);
-    } catch (error) {
-      logger.error(`Failed to create images directory: ${error.message}`);
-    }
   }
 
   setupCommandHandlers() {
@@ -89,12 +70,7 @@ class ConsoleNotifier {
   }
 
   displayAlertMessage(frameNumber, problems, overallStatus, analysisSummary = null) {
-    const statusEmoji = {
-      'good': '✅',
-      'warning': '⚠️',
-      'critical': '🚨',
-      'error': '❌'
-    }[overallStatus] || '❓';
+    const statusEmoji = this.getStatusEmoji(overallStatus);
 
     console.log(`${statusEmoji} 3D Print Alert`);
     console.log(`Frame: ${frameNumber}`);
@@ -136,51 +112,7 @@ class ConsoleNotifier {
     });
   }
 
-  async saveImage(imageBuffer, frameNumber, type = 'frame') {
-    try {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `${type}_${frameNumber}_${timestamp}.jpg`;
-      const filepath = path.join(this.imagesDir, filename);
 
-      // Ensure image is in JPEG format
-      const jpegBuffer = await sharp(imageBuffer)
-        .jpeg({ quality: 90 })
-        .toBuffer();
-
-      await fs.writeFile(filepath, jpegBuffer);
-      return filepath;
-    } catch (error) {
-      logger.error(`Failed to save image: ${error.message}`);
-      return null;
-    }
-  }
-
-  async saveAnnotatedImage(imageBuffer, analysis, frameNumber, type = 'annotated') {
-    try {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `${type}_${frameNumber}_${timestamp}.jpg`;
-      const filepath = path.join(this.annotatedImagesDir, filename);
-
-      // Annotate the image with bounding boxes
-      const annotatedBuffer = await this.imageAnnotator.annotateImage(
-        imageBuffer,
-        analysis,
-        {
-          showLabels: true,
-          showConfidence: true,
-          showStatus: true,
-          borderWidth: 3,
-          fontSize: 20
-        }
-      );
-
-      await fs.writeFile(filepath, annotatedBuffer);
-      return filepath;
-    } catch (error) {
-      logger.error(`Failed to save annotated image: ${error.message}`);
-      return null;
-    }
-  }
 
   async handleStatusCommand(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null, printerModule = null) {
     console.log('📊 Status Command Received');
@@ -241,11 +173,11 @@ class ConsoleNotifier {
           console.log('✅ Analysis complete, processing results...');
         } catch (queueError) {
           console.log(`⚠️ Queue error: ${queueError.message}, falling back to direct processing...`);
-          result = await this.processStatusDirectly(captureInstance, llmClient, prompts, debugMode);
+          result = await this.processStatusDirectlyWithParams(captureInstance, llmClient, prompts, debugMode);
         }
       } else {
         console.log('⚠️ Queue not available, processing directly...');
-        result = await this.processStatusDirectly(captureInstance, llmClient, prompts, debugMode);
+        result = await this.processStatusDirectlyWithParams(captureInstance, llmClient, prompts, debugMode);
       }
 
       // Save the image
@@ -276,8 +208,8 @@ class ConsoleNotifier {
     }
   }
 
-  // Fallback method for direct processing
-  async processStatusDirectly(captureInstance, llmClient, prompts, debugMode = false) {
+  // Fallback method for direct processing (console-specific version with parameters)
+  async processStatusDirectlyWithParams(captureInstance, llmClient, prompts, debugMode = false) {
     // Capture current frame
     const frameBuffer = await captureInstance.captureFrame();
     if (!frameBuffer) {
@@ -327,12 +259,7 @@ class ConsoleNotifier {
 
   // Display analysis results for regular frames (not alerts)
   displayFrameAnalysis(frameNumber, analysis) {
-    const statusEmoji = {
-      'good': '✅',
-      'warning': '⚠️',
-      'critical': '🚨',
-      'error': '❌'
-    }[analysis.overall_status] || '❓';
+    const statusEmoji = this.getStatusEmoji(analysis.overall_status);
 
     console.log(`\n=== Frame ${frameNumber} Analysis ===`);
     console.log(`${statusEmoji} Status: ${analysis.overall_status.toUpperCase()}`);
@@ -460,6 +387,66 @@ class ConsoleNotifier {
     return true;
   }
 
+  // Send PrintGuard failure notification
+  async sendPrintGuardFailureNotification(notificationData) {
+    const {
+      frameNumber,
+      message,
+      printGuardResult,
+      printerStatus = null,
+      imageBuffer
+    } = notificationData;
+
+    console.log(`\n🚨 ===== PRINTGUARD FAILURE DETECTED =====`);
+    console.log(`Frame: #${frameNumber}`);
+    console.log(`Time: ${new Date().toLocaleString()}`);
+    console.log('');
+    
+    // Display the formatted message
+    console.log(message);
+    
+    // Display detailed PrintGuard results
+    console.log(`\n📊 PrintGuard Analysis Details:`);
+    console.log(`   Initial prediction: ${printGuardResult.initialPrediction.className}`);
+    console.log(`   Final prediction: ${printGuardResult.finalPrediction.className}`);
+    console.log(`   Sensitivity: ${printGuardResult.sensitivity}x`);
+    console.log(`   Sensitivity adjusted: ${printGuardResult.sensitivityAdjusted ? 'Yes' : 'No'}`);
+    console.log(`   Processing time: ${printGuardResult.processingTime}ms`);
+    
+    // Display distances
+    console.log(`\n📏 Distances to prototypes:`);
+    printGuardResult.distances.forEach((distance, i) => {
+      const className = printGuardResult.classNames[i] || `Class ${i}`;
+      const isPredicted = i === printGuardResult.finalPrediction.index;
+      const marker = isPredicted ? ' ← PREDICTED' : '';
+      console.log(`   ${className}: ${distance.toFixed(4)}${marker}`);
+    });
+    
+    // Display printer status if available
+    if (printerStatus && printerStatus.success) {
+      console.log(`\n🖨️ Printer Status:`);
+      console.log(`   Machine: ${printerStatus.status?.machine?.text || 'Unknown'}`);
+      
+      if (printerStatus.status?.print?.text) {
+        console.log(`   Print: ${printerStatus.status.print.text}`);
+      }
+      
+      if (printerStatus.progress?.percent) {
+        console.log(`   Progress: ${printerStatus.progress.percent}%`);
+      }
+    }
+    
+    // Save image if provided
+    if (imageBuffer && imageBuffer.length > 0) {
+      const imagePath = await this.saveImage(imageBuffer, frameNumber, 'printguard_failure');
+      console.log(`\n📸 PrintGuard failure image saved: ${imagePath}`);
+    }
+    
+    console.log(`\n==========================================`);
+    console.log('');
+    return true;
+  }
+
   async handleCaptureCommand(captureInstance, llmClient, prompts, debugMode = false, printMonitor = null) {
     console.log('📸 Capture Command Received');
     console.log('Queuing frame capture request...');
@@ -514,11 +501,11 @@ class ConsoleNotifier {
           console.log('✅ Analysis complete, processing results...');
         } catch (queueError) {
           console.log(`⚠️ Queue error: ${queueError.message}, falling back to direct processing...`);
-          result = await this.processStatusDirectly(captureInstance, llmClient, prompts, debugMode);
+          result = await this.processStatusDirectlyWithParams(captureInstance, llmClient, prompts, debugMode);
         }
       } else {
         console.log('⚠️ Queue not available, processing directly...');
-        result = await this.processStatusDirectly(captureInstance, llmClient, prompts, debugMode);
+        result = await this.processStatusDirectlyWithParams(captureInstance, llmClient, prompts, debugMode);
       }
 
       const imagePath = await this.saveImage(result.frameBuffer, 'analysis', 'analysis');
@@ -658,22 +645,6 @@ class ConsoleNotifier {
     console.log('');
   }
 
-  formatUptime(ms) {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (days > 0) {
-      return `${days}d ${hours % 24}h ${minutes % 60}m`;
-    } else if (hours > 0) {
-      return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${seconds % 60}s`;
-    } else {
-      return `${seconds}s`;
-    }
-  }
 }
 
 module.exports = ConsoleNotifier;

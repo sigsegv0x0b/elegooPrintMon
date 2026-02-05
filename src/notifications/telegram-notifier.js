@@ -1111,6 +1111,102 @@ Commands like <code>/status</code>, <code>/capture</code>, <code>/analyze</code>
     }
   }
 
+  // Send PrintGuard failure notification
+  async sendPrintGuardFailureNotification(notificationData) {
+    if (!this.isInitialized) {
+      logger.warn('Telegram notifier not initialized - skipping PrintGuard failure notification');
+      return false;
+    }
+
+    const {
+      frameNumber,
+      message,
+      printGuardResult,
+      printerStatus = null,
+      imageBuffer
+    } = notificationData;
+
+    try {
+      logger.info(`Sending PrintGuard failure notification for frame ${frameNumber}`);
+
+      // Send the main formatted message
+      await this.bot.sendMessage(this.chatId, message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      });
+
+      // Send detailed PrintGuard analysis results
+      if (printGuardResult) {
+        const analysisDetails = `\n📊 <b>PrintGuard Analysis Details:</b>\n` +
+                               `   Initial prediction: ${printGuardResult.initialPrediction.className}\n` +
+                               `   Final prediction: ${printGuardResult.finalPrediction.className}\n` +
+                               `   Sensitivity: ${printGuardResult.sensitivity}x\n` +
+                               `   Sensitivity adjusted: ${printGuardResult.sensitivityAdjusted ? 'Yes' : 'No'}\n` +
+                               `   Processing time: ${printGuardResult.processingTime}ms\n\n` +
+                               `<b>📏 Distances to prototypes:</b>\n`;
+
+        // Add distances for each class
+        let distancesMessage = '';
+        printGuardResult.distances.forEach((distance, i) => {
+          const className = printGuardResult.classNames[i] || `Class ${i}`;
+          const isPredicted = i === printGuardResult.finalPrediction.index;
+          const marker = isPredicted ? ' ← PREDICTED' : '';
+          distancesMessage += `   ${className}: ${distance.toFixed(4)}${marker}\n`;
+        });
+
+        await this.bot.sendMessage(this.chatId, analysisDetails + distancesMessage, {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        });
+      }
+
+      // Send printer status if available
+      if (printerStatus && printerStatus.success) {
+        const statusMessage = `\n🖨️ <b>Printer Status:</b>\n` +
+                             `   Machine: ${printerStatus.status?.machine?.text || 'Unknown'}\n`;
+        
+        if (printerStatus.status?.print?.text) {
+          statusMessage += `   Print: ${printerStatus.status.print.text}\n`;
+        }
+        
+        if (printerStatus.progress?.percent) {
+          statusMessage += `   Progress: ${printerStatus.progress.percent}%\n`;
+        }
+
+        await this.bot.sendMessage(this.chatId, statusMessage, {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        });
+      }
+
+      // Send image if provided
+      if (imageBuffer && imageBuffer.length > 0) {
+        try {
+          // Resize image for Telegram
+          const resizedImage = await sharp(imageBuffer)
+            .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 80 })
+            .toBuffer();
+
+          await this.bot.sendPhoto(this.chatId, resizedImage, {
+            caption: `🚨 Frame ${frameNumber} - PrintGuard Failure Detected`
+          });
+          
+          logger.info(`Sent PrintGuard failure image for frame ${frameNumber} to Telegram`);
+        } catch (imageError) {
+          logger.warn(`Failed to send image with PrintGuard failure notification: ${imageError.message}`);
+        }
+      }
+
+      logger.info(`PrintGuard failure notification sent for frame ${frameNumber}`);
+      return true;
+
+    } catch (error) {
+      logger.error(`Failed to send PrintGuard failure notification: ${error.message}`);
+      return false;
+    }
+  }
+
   // Handle list files command
   async handleListCommand(msg) {
     const chatId = msg.chat.id;

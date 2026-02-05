@@ -113,6 +113,16 @@ class PrinterModule {
     }
 
     /**
+     * Delete files from printer
+     */
+    async deleteFiles(filePaths) {
+        if (!this.status) {
+            throw new Error('Printer module not initialized. Call initialize() first.');
+        }
+        return await this.status.deleteFiles(filePaths);
+    }
+
+    /**
      * Check if printer is connected
      */
     isConnected() {

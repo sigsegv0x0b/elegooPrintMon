@@ -9,6 +9,7 @@ const ConsoleNotifier = require('./notifications/console-notifier');
 const prompts = require('./llm/prompts');
 const { createPrinterModule } = require('./printer/index');
 const ImageCleanup = require('./utils/image-cleanup');
+const { PrintGuardInference } = require('./utils/printguard');
 
 class PrintMonitor {
   constructor() {
@@ -26,6 +27,19 @@ class PrintMonitor {
         logger.info(`Printer module initialized with IP: ${config.printerIP}`);
       } catch (error) {
         logger.warn(`Failed to initialize printer module: ${error.message}`);
+      }
+    }
+
+    // Create PrintGuard instance if enabled
+    this.printGuard = null;
+    if (config.usePrintGuard) {
+      try {
+        this.printGuard = new PrintGuardInference(config.printGuardModelPath, {
+          sensitivity: config.printGuardSensitivity
+        });
+        logger.info(`PrintGuard initialized with model: ${config.printGuardModelPath}`);
+      } catch (error) {
+        logger.warn(`Failed to initialize PrintGuard: ${error.message}`);
       }
     }
 
@@ -166,7 +180,7 @@ class PrintMonitor {
     let printerStatus = null;
     if (this.printerModule) {
       try {
-        printerStatus = this.printerModule.getStatus();
+        printerStatus = await this.printerModule.getStatus();
       } catch (error) {
         logger.warn(`Failed to get printer status: ${error.message}`);
       }
@@ -271,6 +285,180 @@ class PrintMonitor {
 
     logger.debug(`No machine status change detected (${currentMachineText} -> ${currentMachineText})`);
     return false; // No machine status change detected
+  }
+
+  /**
+   * Load PrintGuard prototypes from JSON file
+   */
+  async loadPrintGuardPrototypes() {
+    if (!this.printGuard) {
+      logger.warn('Cannot load prototypes: PrintGuard not initialized');
+      return false;
+    }
+
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      const prototypesPath = path.resolve(this.config.printGuardPrototypesPath);
+      if (!fs.existsSync(prototypesPath)) {
+        throw new Error(`Prototypes file not found: ${prototypesPath}`);
+      }
+      
+      const prototypesData = JSON.parse(fs.readFileSync(prototypesPath, 'utf8'));
+      this.printGuard.setPrototypes(prototypesData);
+      
+      logger.info(`PrintGuard prototypes loaded from: ${prototypesPath}`);
+      logger.info(`Classes: ${prototypesData.class_names?.join(', ') || prototypesData.classNames?.join(', ')}`);
+      logger.info(`Defect index: ${prototypesData.defect_idx !== undefined ? prototypesData.defect_idx : prototypesData.defectIdx}`);
+      
+      return true;
+    } catch (error) {
+      logger.error(`Failed to load PrintGuard prototypes: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Send PrintGuard failure notification
+   */
+  async sendPrintGuardFailureNotification(frameBuffer, frameNumber, printGuardResult, printerStatus) {
+    try {
+      const now = Date.now();
+      
+      // Check cooldown period (same as status change notifications)
+      if (this.lastNotificationTime && (now - this.lastNotificationTime) < this.statusChangeNotificationCooldown) {
+        logger.debug(`Skipping PrintGuard failure notification due to cooldown`);
+        return false;
+      }
+      
+      logger.info(`Sending PrintGuard failure notification for frame #${frameNumber}`);
+      
+      // Format PrintGuard failure message
+      let message = `🚨 **PrintGuard Failure Detected**\n`;
+      message += `Frame: #${frameNumber}\n`;
+      message += `Time: ${new Date().toLocaleString()}\n\n`;
+      
+      message += `🔍 **PrintGuard Analysis**\n`;
+      message += `Prediction: ${printGuardResult.finalPrediction.className}\n`;
+      message += `Initial: ${printGuardResult.initialPrediction.className}\n`;
+      
+      if (printGuardResult.sensitivityAdjusted) {
+        message += `⚠️ Sensitivity adjustment applied (${printGuardResult.sensitivity}x)\n`;
+      }
+      
+      message += `\n📊 **Distances:**\n`;
+      printGuardResult.distances.forEach((distance, i) => {
+        const className = printGuardResult.classNames[i] || `Class ${i}`;
+        const isPredicted = i === printGuardResult.finalPrediction.index;
+        const marker = isPredicted ? ' ← PREDICTED' : '';
+        message += `  ${className}: ${distance.toFixed(4)}${marker}\n`;
+      });
+      
+      // Add printer status if available
+      if (printerStatus && printerStatus.success) {
+        message += `\n🖨️ **Printer Status**\n`;
+        message += `Machine: ${printerStatus.status?.machine?.text || 'Unknown'}\n`;
+        
+        if (printerStatus.status?.print?.text) {
+          message += `Print: ${printerStatus.status.print.text}\n`;
+        }
+        
+        if (printerStatus.progress?.percent) {
+          message += `Progress: ${printerStatus.progress.percent}%\n`;
+        }
+        
+        if (printerStatus.time?.remaining) {
+          message += `ETA: ${printerStatus.time.remaining}\n`;
+        }
+      }
+      
+      // Send to console
+      await this.consoleNotifier.sendPrintGuardFailureNotification({
+        frameNumber,
+        message,
+        printGuardResult,
+        printerStatus,
+        imageBuffer: frameBuffer
+      });
+      
+      // Send to Telegram if configured
+      let telegramSent = false;
+      if (this.telegramNotifier.isConfigured()) {
+        telegramSent = await this.telegramNotifier.sendPrintGuardFailureNotification({
+          frameNumber,
+          message,
+          printGuardResult,
+          printerStatus,
+          imageBuffer: frameBuffer
+        });
+      }
+      
+      this.lastNotificationTime = now;
+      this.stats.notificationsSent++;
+      
+      return telegramSent;
+      
+    } catch (error) {
+      logger.error(`Failed to send PrintGuard failure notification: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Run PrintGuard analysis on a frame
+   */
+  async runPrintGuardAnalysis(frameBuffer, frameNumber, printerStatus) {
+    if (!this.printGuard) {
+      return;
+    }
+
+    try {
+      // Save frame to temporary file for PrintGuard analysis
+      const fs = require('fs');
+      const path = require('path');
+      const os = require('os');
+      
+      const tempDir = os.tmpdir();
+      const tempImagePath = path.join(tempDir, `printguard_frame_${frameNumber}_${Date.now()}.jpg`);
+      
+      // Write frame buffer to temporary file
+      fs.writeFileSync(tempImagePath, frameBuffer);
+      
+      // Run PrintGuard classification
+      const startTime = Date.now();
+      const result = await this.printGuard.classify(tempImagePath);
+      const analysisTime = Date.now() - startTime;
+      
+      // Clean up temporary file
+      try {
+        fs.unlinkSync(tempImagePath);
+      } catch (cleanupError) {
+        logger.debug(`Failed to clean up temp file: ${cleanupError.message}`);
+      }
+      
+      // Log PrintGuard result
+      logger.info(`PrintGuard analysis for frame #${frameNumber}: ${result.finalPrediction.className} (${result.isFailure ? 'FAILURE' : 'SUCCESS'}) in ${analysisTime}ms`);
+      logger.debug(`Distances: ${result.distances.map((d, i) => `${result.classNames[i]}: ${d.toFixed(4)}`).join(', ')}`);
+      
+      // Check if failure detected
+      if (result.isFailure) {
+        logger.warn(`🚨 PrintGuard detected print failure in frame #${frameNumber}`);
+        
+        // Send PrintGuard failure notification
+        await this.sendPrintGuardFailureNotification(frameBuffer, frameNumber, result, printerStatus);
+        
+        // Update statistics
+        this.stats.framesWithProblems++;
+        this.stats.totalProblemsDetected++;
+      }
+      
+      return result;
+      
+    } catch (error) {
+      logger.warn(`PrintGuard analysis failed for frame #${frameNumber}: ${error.message}`);
+      return null;
+    }
   }
 
   /**
@@ -385,6 +573,24 @@ class PrintMonitor {
         logger.warn('Telegram notifications: DISABLED (credentials not provided)');
       }
       
+      // Initialize PrintGuard if enabled
+      if (this.config.usePrintGuard && this.printGuard) {
+        try {
+          await this.printGuard.init();
+          logger.info(`PrintGuard: ENABLED (sensitivity: ${this.config.printGuardSensitivity})`);
+          
+          // Load prototypes
+          await this.loadPrintGuardPrototypes();
+        } catch (error) {
+          logger.warn(`PrintGuard initialization failed: ${error.message}`);
+          this.printGuard = null;
+        }
+      } else if (this.config.usePrintGuard) {
+        logger.warn('PrintGuard: CONFIGURED BUT FAILED TO INITIALIZE');
+      } else {
+        logger.info('PrintGuard: DISABLED');
+      }
+      
       // Check for console mode flag
       if (process.argv.includes('--console') || process.argv.includes('-c')) {
         this.consoleMode = true;
@@ -468,6 +674,19 @@ class PrintMonitor {
           try {
             printerStatus = await this.printerModule.getStatus();
             logger.debug(`Printer status for analysis decision: machine=${printerStatus?.status?.machine?.code}, print=${printerStatus?.status?.print?.code}, success=${printerStatus?.success}`);
+            
+            // Check for status changes (even in LLM enabled mode)
+            const statusChanged = this.hasPrinterStatusChanged(printerStatus, this.lastPrinterStatus);
+            
+            if (statusChanged) {
+              // Send status change notification with previous status for comparison
+              await this.sendPrinterStatusChangeNotification(printerStatus, this.lastPrinterStatus, frameNumber, frameBuffer);
+            }
+            
+            // Update last status
+            this.lastPrinterStatus = printerStatus;
+            this.lastPrinterStatusTime = Date.now();
+            
           } catch (error) {
             logger.debug(`Could not get printer status for analysis decision: ${error.message}`);
           }
@@ -578,6 +797,11 @@ class PrintMonitor {
 
         // Update statistics (count as processed regardless of LLM analysis)
         this.stats.framesProcessed++;
+        
+        // Run PrintGuard analysis if enabled and printer is actively printing
+        if (this.printGuard && printerStatus && printerStatus.success && printerStatus.status?.machine?.code === 1) {
+          await this.runPrintGuardAnalysis(frameBuffer, frameNumber, printerStatus);
+        }
       } else {
         // LLM mode disabled - just capture frame and check for status changes
         logger.info(`Frame #${frameNumber} captured (LLM analysis disabled)`);
@@ -621,6 +845,11 @@ class PrintMonitor {
           llmEnabled: false,
           isStatusChange: false // Regular frame, not a status change
         });
+        
+        // Run PrintGuard analysis if enabled and printer is actively printing
+        if (this.printGuard && printerStatus && printerStatus.success && printerStatus.status?.machine?.code === 1) {
+          await this.runPrintGuardAnalysis(frameBuffer, frameNumber, printerStatus);
+        }
       }
       
       // Periodic status update (every 10 frames)

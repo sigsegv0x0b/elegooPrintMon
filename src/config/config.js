@@ -25,6 +25,12 @@ const config = {
   retryDelay: parseInt(process.env.RETRY_DELAY || '5000'),
   llmCooldownSeconds: parseInt(process.env.LLM_COOLDOWN_SECONDS || '10'), // Seconds to wait after LLM reply
   
+  // PrintGuard Configuration
+  usePrintGuard: process.env.USE_PRINTGUARD === 'true',
+  printGuardSensitivity: parseFloat(process.env.PRINTGUARD_SENSITIVITY || '1.0'),
+  printGuardModelPath: process.env.PRINTGUARD_MODEL_PATH || './models/model.onnx',
+  printGuardPrototypesPath: process.env.PRINTGUARD_PROTOTYPES_PATH || './models/prototypes/prototypes.json',
+  
   // Validation
   validate: function() {
     const errors = [];
