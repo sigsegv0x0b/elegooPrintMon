@@ -85,6 +85,22 @@ class ImageCleanup {
                 }
             }
 
+            // Clean videos subdirectory
+            const videosDir = path.join(this.imagesDir, 'videos');
+            try {
+                const videosStats = await this.cleanupDirectory(videosDir);
+                stats.scanned += videosStats.scanned;
+                stats.deleted += videosStats.deleted;
+                stats.errors += videosStats.errors;
+                stats.totalSizeFreed += videosStats.totalSizeFreed;
+            } catch (error) {
+                // Videos directory might not exist, that's okay
+                if (error.code !== 'ENOENT') {
+                    logger.warn(`Error cleaning videos directory: ${error.message}`);
+                    stats.errors++;
+                }
+            }
+
             logger.info(`Image cleanup completed: scanned ${stats.scanned} files, deleted ${stats.deleted} files, freed ${this.formatBytes(stats.totalSizeFreed)}, ${stats.errors} errors`);
 
         } catch (error) {

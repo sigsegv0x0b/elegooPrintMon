@@ -10,6 +10,7 @@ const prompts = require('./llm/prompts');
 const { createPrinterModule } = require('./printer/index');
 const ImageCleanup = require('./utils/image-cleanup');
 const { PrintGuardInference } = require('./utils/printguard');
+const VideoRecorder = require('../record-video');
 
 class PrintMonitor {
   constructor() {
@@ -45,6 +46,9 @@ class PrintMonitor {
 
     // Create image cleanup service
     this.imageCleanup = new ImageCleanup('images');
+    
+    // Create video recorder
+    this.videoRecorder = new VideoRecorder();
     
     // Pass dependencies to Telegram notifier for command handling
     this.telegramNotifier.setDependencies(this.capture, this.llmClient, prompts, this, this.printerModule);
@@ -135,6 +139,9 @@ class PrintMonitor {
           case 'frame':
             result = await this.processFrameRequest(request.options);
             break;
+          case 'video':
+            result = await this.processVideoRequest(request.options);
+            break;
           default:
             throw new Error(`Unknown request type: ${request.type}`);
         }
@@ -220,6 +227,39 @@ class PrintMonitor {
       frameBuffer,
       timestamp: Date.now()
     };
+  }
+  
+  /**
+   * Process video recording request
+   * @param {Object} options - Request options
+   * @param {number} options.duration - Duration in seconds (default: 5)
+   * @param {string} options.outputFile - Optional output file path
+   * @param {string} options.source - Request source (e.g., 'telegram')
+   * @param {string} options.chatId - Telegram chat ID for notifications
+   */
+  async processVideoRequest(options) {
+    const { 
+      duration = 5, 
+      outputFile = null, 
+      source = 'unknown', 
+      chatId = null 
+    } = options;
+    
+    logger.info(`Processing video request from ${source}${chatId ? ` (chat: ${chatId})` : ''} for ${duration} seconds`);
+    
+    try {
+      // Record video using VideoRecorder
+      const videoFile = await this.videoRecorder.record(duration, outputFile);
+      
+      return {
+        videoFile,
+        duration,
+        timestamp: Date.now()
+      };
+    } catch (error) {
+      logger.error(`Video recording failed: ${error.message}`);
+      throw error;
+    }
   }
 
   /**

@@ -301,10 +301,15 @@ class TelegramNotifier extends BaseCommunication {
       this.handleDeleteCommand(msg);
     });
 
+    // Video command
+    this.bot.onText(/\/video|video/i, (msg) => {
+      this.handleVideoCommand(msg);
+    });
+
     logger.info('Telegram bot command handlers registered');
   }
 
-  // Handle help command
+   // Handle help command
   async handleHelpCommand(msg) {
     const chatId = msg.chat.id;
     const helpMessage = `
@@ -317,6 +322,11 @@ Available commands:
 • <code>/capture</code> or <code>capture</code> - Capture and send current frame
 • <code>/analyze</code> or <code>analyze</code> - Capture, analyze, and send detailed AI analysis
 
+<b>🎥 Video Recording</b>
+• <code>/video</code> or <code>video</code> - Record 5 second video clip (default)
+• <code>/video 10</code> or <code>video 10</code> - Record 10 second video clip
+• <code>/video [seconds]</code> - Record custom duration (max 60 seconds)
+
 <b>📁 File Management</b>
 • <code>/list</code> or <code>list</code> - List all files stored on the printer
 • <code>/delete</code> or <code>delete</code> - Delete files by number (e.g., /delete 1,2,3)
@@ -325,7 +335,7 @@ Available commands:
 • <code>/pause</code> or <code>pause</code> - Pause the current print job
 • <code>/resume</code> or <code>resume</code> - Resume a paused print job
 
-<b>� Alert Configuration</b>
+<b>🔔 Alert Configuration</b>
 • <code>/alertlevel</code> - Configure automatic notification settings
   - <code>/alertlevel all</code> - Send alerts for all statuses
   - <code>/alertlevel warning</code> - Send alerts for warning+
@@ -340,6 +350,7 @@ Available commands:
 • System automatically monitors prints 24/7
 • Sends alerts based on configured alert level
 • All images include annotated bounding boxes
+• Video recording captures live printer stream
 • Commands work regardless of alert level setting
 
 Type any command to interact with your print monitor!
@@ -1561,6 +1572,148 @@ Commands like <code>/status</code>, <code>/capture</code>, <code>/analyze</code>
     const i = Math.floor(Math.log(bytes) / Math.log(k));
 
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  // Handle video command
+  async handleVideoCommand(msg) {
+    const chatId = msg.chat.id;
+    const text = msg.text || '';
+    
+    try {
+      // Parse duration from command (e.g., "video 10" or "/video 5")
+      let duration = 5; // Default 5 seconds
+      const match = text.match(/(?:video|\/video)\s+(\d+)/i);
+      if (match) {
+        duration = parseInt(match[1], 10);
+        if (isNaN(duration) || duration <= 0) {
+          duration = 5; // Fallback to default
+        }
+        // Limit duration to reasonable values
+        if (duration > 60) {
+          await this.bot.sendMessage(chatId, `⚠️ <b>Duration too long</b>\nMaximum duration is 60 seconds. Using 60 seconds instead.`, {
+            parse_mode: 'HTML'
+          });
+          duration = 60;
+        }
+      }
+      
+      // Check if we have the required dependencies
+      if (!this.printMonitor) {
+        await this.bot.sendMessage(chatId, '⚠️ <b>System Not Ready</b>\nPrint monitor not available. Please ensure the main application is running.', {
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      // Check if video recording is already in progress
+      if (this.printMonitor.videoRecorder && this.printMonitor.videoRecorder.isRecording) {
+        await this.bot.sendMessage(chatId, '⏸️ <b>Video Recording Already in Progress</b>\nPlease wait for the current recording to finish before starting a new one.', {
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
+      await this.bot.sendMessage(chatId, `🎥 <b>Video Command Received</b>\nRecording ${duration} second video clip...`, {
+        parse_mode: 'HTML'
+      });
+
+      // Use queue system if available
+      let result;
+      if (this.printMonitor.queueLLMRequest) {
+        try {
+          // Queue the video recording request
+          result = await this.printMonitor.queueLLMRequest('video', {
+            source: 'telegram',
+            chatId,
+            duration
+          });
+          
+          await this.bot.sendMessage(chatId, '✅ <b>Video Recording Complete</b>\nProcessing video file...', {
+            parse_mode: 'HTML'
+          });
+          
+        } catch (queueError) {
+          logger.error(`Queue request failed: ${queueError.message}`);
+          await this.bot.sendMessage(chatId, '⚠️ <b>Queue Error</b>\nFalling back to direct recording...', {
+            parse_mode: 'HTML'
+          });
+          
+          // Fall back to direct recording
+          result = await this.processVideoDirectly(duration);
+        }
+      } else {
+        // Fall back to direct recording
+        await this.bot.sendMessage(chatId, '⚠️ <b>Queue Not Available</b>\nRecording directly...', {
+          parse_mode: 'HTML'
+        });
+        result = await this.processVideoDirectly(duration);
+      }
+
+      // Send video file
+      if (result && result.videoFile) {
+        try {
+          // Check file size (Telegram has 50MB limit for videos)
+          const fs = require('fs');
+          const stats = fs.statSync(result.videoFile);
+          const fileSizeMB = stats.size / (1024 * 1024);
+          
+          if (fileSizeMB > 50) {
+            await this.bot.sendMessage(chatId, `⚠️ <b>Video too large</b>\nVideo file is ${fileSizeMB.toFixed(2)}MB (Telegram limit: 50MB). Cannot send via Telegram.`, {
+              parse_mode: 'HTML'
+            });
+          } else {
+            // Send video file
+            await this.bot.sendVideo(chatId, result.videoFile, {
+              caption: `🎥 ${duration} second video clip`
+            });
+            
+            await this.bot.sendMessage(chatId, `✅ <b>Video sent successfully!</b>\nDuration: ${duration} seconds\nFile size: ${fileSizeMB.toFixed(2)}MB`, {
+              parse_mode: 'HTML'
+            });
+          }
+          
+          // Clean up video file after sending
+          try {
+            fs.unlinkSync(result.videoFile);
+            logger.info(`Cleaned up video file: ${result.videoFile}`);
+          } catch (cleanupError) {
+            logger.warn(`Failed to clean up video file: ${cleanupError.message}`);
+          }
+          
+        } catch (videoError) {
+          logger.error(`Failed to send video: ${videoError.message}`);
+          await this.bot.sendMessage(chatId, `❌ Failed to send video: ${videoError.message}`, {
+            parse_mode: 'HTML'
+          });
+        }
+      } else {
+        await this.bot.sendMessage(chatId, '❌ <b>Video Recording Failed</b>\nCould not record video. Please try again later.', {
+          parse_mode: 'HTML'
+        });
+      }
+
+    } catch (error) {
+      logger.error(`Failed to handle video command: ${error.message}`);
+      await this.bot.sendMessage(chatId, `❌ Failed to process video command: ${error.message}`, {
+        parse_mode: 'HTML'
+      });
+    }
+  }
+
+  // Fallback method for direct video recording (without queue)
+  async processVideoDirectly(duration) {
+    if (!this.printMonitor || !this.printMonitor.videoRecorder) {
+      throw new Error('Video recorder not available');
+    }
+    
+    // Record video using VideoRecorder
+    const videoFile = await this.printMonitor.videoRecorder.record(duration);
+    
+    return {
+      videoFile,
+      duration,
+      timestamp: Date.now()
+    };
   }
 
   // Method to set dependencies for command handling
