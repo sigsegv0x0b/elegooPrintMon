@@ -48,17 +48,16 @@ class VideoRecorder {
 
     return new Promise((resolve, reject) => {
       // Use ffmpeg to capture directly from MJPEG stream
-      // -t duration: limit recording time
-      // -y: overwrite output file
-      // -c:v libx264: use H.264 codec
-      // -preset fast: balance between speed and compression
-      // -crf 23: quality setting (lower = better quality, 23 is good)
-      // -pix_fmt yuv420p: compatible pixel format
-      // -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2": ensure even dimensions
+      // Using -frames:v for exact frame count (more reliable than -t for MJPEG)
+      // Also specify output frame rate with -r to ensure correct duration
+      const targetFps = 25; // Printer specification
+      const framesNeeded = durationSeconds * targetFps;
+      
       const ffmpegArgs = [
         '-y', // Overwrite output file
-        '-t', durationSeconds.toString(), // Duration in seconds
         '-i', this.streamUrl, // Input stream URL
+        '-frames:v', framesNeeded.toString(), // Exact number of frames to capture
+        '-r', targetFps.toString(), // Output frame rate (ensures correct duration)
         '-c:v', 'libx264', // Video codec
         '-preset', 'fast', // Encoding preset
         '-crf', '23', // Constant Rate Factor (quality)
@@ -67,6 +66,8 @@ class VideoRecorder {
         '-movflags', '+faststart', // Optimize for web streaming
         outputFile
       ];
+      
+      logger.info(`Capturing ${framesNeeded} frames at ${targetFps}fps (${durationSeconds}s total)`);
 
       // Show the exact ffmpeg command being executed
       const ffmpegCommand = `ffmpeg ${ffmpegArgs.map(arg => arg.includes(' ') ? `"${arg}"` : arg).join(' ')}`;
@@ -92,9 +93,12 @@ class VideoRecorder {
         }
       });
       
-      // Set timeout: 3x duration + 15 second buffer for ffmpeg startup and processing
-      const timeoutMs = (durationSeconds * 3000) + 15000; // 3x duration + 15 seconds
-      logger.info(`Timeout set to ${timeoutMs/1000}s (3x duration ${durationSeconds}s + 15s buffer)`);
+      // Set timeout: Based on expected time to capture frames + buffer
+      // If capturing at 25fps, but stream might be slower, use conservative estimate
+      // Minimum 2x expected time + 15 second buffer
+      const expectedTimeMs = durationSeconds * 2000; // 2x expected duration (conservative)
+      const timeoutMs = expectedTimeMs + 15000; // 2x duration + 15 seconds
+      logger.info(`Timeout set to ${timeoutMs/1000}s (2x expected ${durationSeconds}s + 15s buffer)`);
       const timeoutId = setTimeout(() => {
         if (this.ffmpegProcess) {
           logger.warn(`ffmpeg process timeout after ${timeoutMs}ms - killing process`);
