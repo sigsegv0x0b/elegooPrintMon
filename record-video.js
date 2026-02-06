@@ -92,9 +92,9 @@ class VideoRecorder {
         }
       });
       
-      // Set timeout: 3x duration + 10 second buffer for ffmpeg startup and processing
-      const timeoutMs = (durationSeconds * 3000) + 10000; // 3x duration + 10 seconds
-      logger.info(`Timeout set to ${timeoutMs/1000}s (3x duration ${durationSeconds}s + 10s buffer)`);
+      // Set timeout: 3x duration + 15 second buffer for ffmpeg startup and processing
+      const timeoutMs = (durationSeconds * 3000) + 15000; // 3x duration + 15 seconds
+      logger.info(`Timeout set to ${timeoutMs/1000}s (3x duration ${durationSeconds}s + 15s buffer)`);
       const timeoutId = setTimeout(() => {
         if (this.ffmpegProcess) {
           logger.warn(`ffmpeg process timeout after ${timeoutMs}ms - killing process`);
